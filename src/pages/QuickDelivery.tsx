@@ -8,7 +8,7 @@ import type { Customer, Delivery } from '../types';
 import { 
   Truck, CheckCircle2, Droplets, RotateCcw, MessageSquare, 
   Search, Calendar, Filter, Clock, Plus, Minus, MapPin, 
-  Phone, Sparkles, Check
+  Phone, Sparkles, Check, CheckSquare, Square, X, Users
 } from 'lucide-react';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
@@ -20,6 +20,12 @@ export default function QuickDelivery() {
   const [selectedDate, setSelectedDate] = useState(todayStr);
   const [search, setSearch] = useState('');
   const [areaFilter, setAreaFilter] = useState('all');
+
+  // Multi-Customer Selection State
+  const [selectedCustomerIds, setSelectedCustomerIds] = useState<string[]>([]);
+  const [bulkQtyMode, setBulkQtyMode] = useState<'default' | 'custom'>('default');
+  const [bulkCustomQty, setBulkCustomQty] = useState(1);
+  const [bulkPaymentStatus, setBulkPaymentStatus] = useState<'unpaid' | 'paid'>('unpaid');
 
   // Customer state for rapid entry (qty, empty cans, paid status)
   const [entries, setEntries] = useState<Record<string, {
@@ -60,6 +66,63 @@ export default function QuickDelivery() {
       return matchSearch && matchArea;
     });
   }, [customers, search, areaFilter]);
+
+  // Pending customers on route (not yet delivered today)
+  const pendingCustomers = useMemo(() => {
+    return filteredCustomers.filter(c => !todayDeliveriesMap[c.id]);
+  }, [filteredCustomers, todayDeliveriesMap]);
+
+  const toggleSelectCustomer = (id: string) => {
+    setSelectedCustomerIds(prev => 
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  };
+
+  const selectAllPending = () => {
+    if (selectedCustomerIds.length === pendingCustomers.length && pendingCustomers.length > 0) {
+      setSelectedCustomerIds([]);
+    } else {
+      setSelectedCustomerIds(pendingCustomers.map(c => c.id));
+    }
+  };
+
+  const handleBulkDeliver = () => {
+    if (selectedCustomerIds.length === 0) {
+      toast.error('Baraye meharbani pehle customers select karein.');
+      return;
+    }
+
+    const nowTime = format(new Date(), 'HH:mm');
+    let count = 0;
+
+    selectedCustomerIds.forEach(id => {
+      const customer = customers.find(c => c.id === id);
+      if (!customer) return;
+
+      const qty = bulkQtyMode === 'custom' ? Math.max(1, bulkCustomQty) : (customer.quantity || 1);
+      const unitPrice = customer.pricePerUnit || settings.defaultWaterPrice || 30;
+      const totalPrice = qty * unitPrice;
+
+      addDelivery({
+        customerId: customer.id,
+        customerName: customer.name,
+        date: selectedDate,
+        time: nowTime,
+        quantity: qty,
+        emptyBottlesReceived: qty,
+        waterType: customer.waterType || 'Regular Jar',
+        pricePerUnit: unitPrice,
+        totalPrice,
+        paymentStatus: bulkPaymentStatus,
+        paidAmount: bulkPaymentStatus === 'paid' ? totalPrice : 0,
+        notes: `Multi-Customer Route Delivery`,
+      });
+      count++;
+    });
+
+    toast.success(`Mubarak! ${count} customers ko ek sath delivery record ho gayi!`);
+    setSelectedCustomerIds([]);
+  };
 
   // State getter with defaults
   const getEntry = (c: Customer) => {
@@ -229,6 +292,48 @@ export default function QuickDelivery() {
         </div>
       </Card>
 
+      {/* Multi-Customer Selection Bar */}
+      {pendingCustomers.length > 0 && (
+        <div className="bg-sky-50/70 border border-sky-200/80 rounded-2xl p-3.5 flex flex-wrap items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={selectAllPending}
+              className="flex items-center gap-2 px-3 py-1.5 bg-white hover:bg-sky-50 text-sky-700 text-xs font-bold rounded-xl border border-sky-200 transition-all shadow-xs"
+            >
+              {selectedCustomerIds.length === pendingCustomers.length && pendingCustomers.length > 0 ? (
+                <>
+                  <CheckSquare className="w-4 h-4 text-sky-600" />
+                  <span>Deselect All Pending</span>
+                </>
+              ) : (
+                <>
+                  <Square className="w-4 h-4 text-sky-500" />
+                  <span>Select All Pending ({pendingCustomers.length})</span>
+                </>
+              )}
+            </button>
+
+            {selectedCustomerIds.length > 0 && (
+              <span className="text-xs font-bold text-sky-900 bg-sky-200/70 px-2.5 py-1 rounded-lg">
+                {selectedCustomerIds.length} Selected for Delivery
+              </span>
+            )}
+          </div>
+
+          {selectedCustomerIds.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setSelectedCustomerIds([])}
+              className="text-xs text-gray-500 hover:text-gray-800 font-semibold flex items-center gap-1"
+            >
+              <X className="w-3.5 h-3.5" />
+              <span>Clear selection</span>
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Rapid Delivery List */}
       {filteredCustomers.length === 0 ? (
         <EmptyState
@@ -244,42 +349,64 @@ export default function QuickDelivery() {
             const entry = getEntry(customer);
             const balance = getCustomerBalance(customer.id);
             const unitPrice = customer.pricePerUnit || settings.defaultWaterPrice || 30;
+            const isSelected = selectedCustomerIds.includes(customer.id);
 
             return (
               <Card 
                 key={customer.id} 
-                className={`p-4 transition-all border ${
+                className={`p-4 transition-all border relative ${
                   isDelivered 
                     ? 'border-emerald-200 bg-emerald-50/20' 
+                    : isSelected
+                    ? 'border-sky-500 bg-sky-50/40 ring-2 ring-sky-400/40 shadow-sm'
                     : 'border-gray-200/80 bg-white hover:border-sky-300'
                 }`}
               >
                 {/* Customer Info Header */}
-                <div className="flex items-start justify-between mb-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <h3 className="font-bold text-gray-900 text-base truncate">{customer.name}</h3>
-                      {customer.area && (
-                        <span className="text-[10px] bg-sky-100 text-sky-700 font-semibold px-2 py-0.5 rounded-md">
-                          {customer.area}
-                        </span>
-                      )}
+                <div className="flex items-start justify-between mb-3 gap-2">
+                  <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                    {!isDelivered && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleSelectCustomer(customer.id);
+                        }}
+                        className={`mt-0.5 w-5 h-5 rounded-md flex items-center justify-center transition-all ${
+                          isSelected
+                            ? 'bg-sky-600 text-white shadow-xs'
+                            : 'border-2 border-gray-300 hover:border-sky-500 bg-white'
+                        }`}
+                        title={isSelected ? "Deselect customer" : "Select customer for multi-delivery"}
+                      >
+                        {isSelected && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                      </button>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-bold text-gray-900 text-base truncate">{customer.name}</h3>
+                        {customer.area && (
+                          <span className="text-[10px] bg-sky-100 text-sky-700 font-semibold px-2 py-0.5 rounded-md">
+                            {customer.area}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
+                        <Phone className="w-3 h-3 text-gray-400" />
+                        <span>{customer.phone}</span>
+                      </p>
+                      <p className="text-[11px] text-gray-400 truncate mt-0.5">{customer.address}</p>
                     </div>
-                    <p className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
-                      <Phone className="w-3 h-3 text-gray-400" />
-                      <span>{customer.phone}</span>
-                    </p>
-                    <p className="text-[11px] text-gray-400 truncate mt-0.5">{customer.address}</p>
                   </div>
 
                   {/* Status Badge */}
                   {isDelivered ? (
-                    <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-500 text-white rounded-full text-xs font-bold shadow-sm shadow-emerald-500/20">
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-500 text-white rounded-full text-xs font-bold shadow-sm shadow-emerald-500/20 shrink-0">
                       <Check className="w-3.5 h-3.5 stroke-[3]" />
                       Done
                     </span>
                   ) : (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full text-[11px] font-semibold">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full text-[11px] font-semibold shrink-0">
                       <Clock className="w-3 h-3" />
                       Pending
                     </span>
@@ -432,6 +559,106 @@ export default function QuickDelivery() {
               </Card>
             );
           })}
+        </div>
+      )}
+
+      {/* Floating Bulk Delivery Action Bar */}
+      {selectedCustomerIds.length > 0 && (
+        <div className="fixed bottom-4 left-4 right-4 md:left-72 md:right-8 z-40">
+          <div className="bg-gradient-to-r from-sky-900 via-sky-800 to-blue-900 text-white p-4 rounded-2xl shadow-2xl border border-sky-700/60 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-sky-500/30 border border-sky-400/40 flex items-center justify-center font-black text-sky-200 shrink-0">
+                {selectedCustomerIds.length}
+              </div>
+              <div>
+                <h4 className="font-bold text-sm text-white">
+                  {selectedCustomerIds.length} Customer{selectedCustomerIds.length > 1 ? 's' : ''} Selected
+                </h4>
+                <p className="text-xs text-sky-200/80">
+                  Multiple customers ko ek sath deliver karein
+                </p>
+              </div>
+            </div>
+
+            {/* Quick Bulk Settings */}
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              {/* Qty mode */}
+              <div className="flex items-center bg-sky-950/60 rounded-xl p-1 border border-sky-700/50">
+                <button
+                  type="button"
+                  onClick={() => setBulkQtyMode('default')}
+                  className={`px-2.5 py-1 rounded-lg font-semibold transition-all ${
+                    bulkQtyMode === 'default' ? 'bg-sky-500 text-white' : 'text-sky-200 hover:text-white'
+                  }`}
+                >
+                  Customer Default Qty
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBulkQtyMode('custom')}
+                  className={`px-2.5 py-1 rounded-lg font-semibold transition-all ${
+                    bulkQtyMode === 'custom' ? 'bg-sky-500 text-white' : 'text-sky-200 hover:text-white'
+                  }`}
+                >
+                  Fixed Qty
+                </button>
+              </div>
+
+              {bulkQtyMode === 'custom' && (
+                <div className="flex items-center gap-1.5 bg-sky-950/60 px-2 py-1 rounded-xl border border-sky-700/50">
+                  <span className="text-[11px] text-sky-200 font-medium">Bottles:</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={bulkCustomQty}
+                    onChange={(e) => setBulkCustomQty(Math.max(1, parseInt(e.target.value) || 1))}
+                    className="w-12 bg-white text-gray-900 text-center font-bold rounded px-1 py-0.5 text-xs"
+                  />
+                </div>
+              )}
+
+              {/* Payment Status */}
+              <div className="flex items-center bg-sky-950/60 rounded-xl p-1 border border-sky-700/50">
+                <button
+                  type="button"
+                  onClick={() => setBulkPaymentStatus('unpaid')}
+                  className={`px-2.5 py-1 rounded-lg font-semibold transition-all ${
+                    bulkPaymentStatus === 'unpaid' ? 'bg-rose-500 text-white' : 'text-sky-200 hover:text-white'
+                  }`}
+                >
+                  Udhar (Credit)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBulkPaymentStatus('paid')}
+                  className={`px-2.5 py-1 rounded-lg font-semibold transition-all ${
+                    bulkPaymentStatus === 'paid' ? 'bg-emerald-500 text-white' : 'text-sky-200 hover:text-white'
+                  }`}
+                >
+                  Paid Cash
+                </button>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setSelectedCustomerIds([])}
+                className="px-3 py-2 bg-white/10 hover:bg-white/20 text-white text-xs font-semibold rounded-xl transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleBulkDeliver}
+                className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-black rounded-xl shadow-lg shadow-emerald-500/30 flex items-center gap-1.5 transition-all"
+              >
+                <Truck className="w-4 h-4" />
+                <span>Deliver to ({selectedCustomerIds.length}) Selected</span>
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

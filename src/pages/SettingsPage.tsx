@@ -3,7 +3,6 @@ import { useApp } from '../context/AppContext';
 import { PageHeader, Card, FormInput, FormSelect, FormTextarea, Button, ConfirmDialog } from '../components/ui';
 import { Building2, Globe, Bell, Database, Download, Upload, Trash2, ShieldCheck, Calendar, Clock, Smartphone, PlusSquare, Share2 } from 'lucide-react';
 import { getAuth, getBusinessById } from '../services/adminService';
-import SupabaseConfigCard from '../components/SupabaseConfigCard';
 import toast from 'react-hot-toast';
 
 const currencyMap: Record<string, string> = { 
@@ -82,9 +81,6 @@ export default function SettingsPage() {
   return (
     <div className="space-y-6 pb-20 lg:pb-0 max-w-3xl">
       <PageHeader title="Settings" subtitle="Manage your business configuration & subscription" />
-
-      {/* Supabase Cloud Database Config */}
-      <SupabaseConfigCard />
 
       {/* Subscription Card */}
       {business && (

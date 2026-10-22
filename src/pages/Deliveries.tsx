@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { PageHeader, Card, Button, SearchInput, Modal, ConfirmDialog, FormInput, FormSelect, FormTextarea, SearchableSelect, StatusBadge, EmptyState } from '../components/ui';
-import { Truck, Plus, Edit, Trash2, Calendar, MessageSquare, Phone } from 'lucide-react';
+import { Truck, Plus, Edit, Trash2, Calendar, MessageSquare, Phone, Users, CheckSquare, Square, Check, X } from 'lucide-react';
 import { format } from 'date-fns';
 import { openWhatsAppDeliverySlip, openSmsDeliverySlip, getCustomerBalance } from '../services/dataService';
 import toast from 'react-hot-toast';
@@ -25,6 +25,106 @@ export default function Deliveries() {
     paidAmount: settings.defaultWaterPrice, notes: '',
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // Multi-Customer Bulk Delivery Modal State
+  const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
+  const [bulkSelectedIds, setBulkSelectedIds] = useState<string[]>([]);
+  const [bulkSearch, setBulkSearch] = useState('');
+  const [bulkAreaFilter, setBulkAreaFilter] = useState('all');
+  const [bulkDate, setBulkDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [bulkTime, setBulkTime] = useState(format(new Date(), 'HH:mm'));
+  const [bulkQtyMode, setBulkQtyMode] = useState<'default' | 'custom'>('default');
+  const [bulkCustomQty, setBulkCustomQty] = useState(1);
+  const [bulkPaymentStatus, setBulkPaymentStatus] = useState<'paid' | 'unpaid'>('unpaid');
+
+  const areas = useMemo(() => {
+    const set = new Set<string>();
+    customers.forEach(c => {
+      if (c.area) set.add(c.area);
+    });
+    return Array.from(set);
+  }, [customers]);
+
+  const bulkFilteredCustomers = useMemo(() => {
+    return customers.filter(c => {
+      if (c.status !== 'active') return false;
+      const matchSearch = 
+        !bulkSearch || 
+        c.name.toLowerCase().includes(bulkSearch.toLowerCase()) || 
+        c.phone.includes(bulkSearch) || 
+        (c.area && c.area.toLowerCase().includes(bulkSearch.toLowerCase()));
+      const matchArea = bulkAreaFilter === 'all' || c.area === bulkAreaFilter;
+      return matchSearch && matchArea;
+    });
+  }, [customers, bulkSearch, bulkAreaFilter]);
+
+  const toggleBulkCustomer = (id: string) => {
+    setBulkSelectedIds(prev => 
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  };
+
+  const selectAllBulkFiltered = () => {
+    const filteredIds = bulkFilteredCustomers.map(c => c.id);
+    const allSelected = filteredIds.length > 0 && filteredIds.every(id => bulkSelectedIds.includes(id));
+    if (allSelected) {
+      setBulkSelectedIds(prev => prev.filter(id => !filteredIds.includes(id)));
+    } else {
+      setBulkSelectedIds(prev => Array.from(new Set([...prev, ...filteredIds])));
+    }
+  };
+
+  const bulkSummary = useMemo(() => {
+    let bottles = 0;
+    let totalAmt = 0;
+    bulkSelectedIds.forEach(id => {
+      const c = customers.find(x => x.id === id);
+      if (!c) return;
+      const qty = bulkQtyMode === 'custom' ? Math.max(1, bulkCustomQty) : (c.quantity || 1);
+      const price = c.pricePerUnit || settings.defaultWaterPrice || 30;
+      bottles += qty;
+      totalAmt += qty * price;
+    });
+    return { count: bulkSelectedIds.length, bottles, totalAmt };
+  }, [bulkSelectedIds, bulkQtyMode, bulkCustomQty, customers, settings]);
+
+  const handleBulkSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (bulkSelectedIds.length === 0) {
+      toast.error('Baraye meharbani pehle customers select karein.');
+      return;
+    }
+
+    let count = 0;
+    bulkSelectedIds.forEach(id => {
+      const c = customers.find(x => x.id === id);
+      if (!c) return;
+
+      const qty = bulkQtyMode === 'custom' ? Math.max(1, bulkCustomQty) : (c.quantity || 1);
+      const unitPrice = c.pricePerUnit || settings.defaultWaterPrice || 30;
+      const totalPrice = qty * unitPrice;
+
+      addDelivery({
+        customerId: c.id,
+        customerName: c.name,
+        date: bulkDate,
+        time: bulkTime,
+        quantity: qty,
+        emptyBottlesReceived: qty,
+        waterType: c.waterType || 'Regular',
+        pricePerUnit: unitPrice,
+        totalPrice,
+        paymentStatus: bulkPaymentStatus,
+        paidAmount: bulkPaymentStatus === 'paid' ? totalPrice : 0,
+        notes: 'Multi-Customer Delivery',
+      });
+      count++;
+    });
+
+    toast.success(`Mubarak! ${count} customers ko ek sath delivery record ho gayi!`);
+    setIsBulkModalOpen(false);
+    setBulkSelectedIds([]);
+  };
 
   const filtered = useMemo(() => {
     return deliveries.filter(d => {
@@ -163,9 +263,18 @@ export default function Deliveries() {
         title="Delivery Records" 
         subtitle={`${deliveries.length} total deliveries recorded`} 
         action={
-          <Button onClick={() => openModal()} icon={<Plus className="w-4 h-4" />}>
-            Record Delivery
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button 
+              variant="secondary" 
+              onClick={() => setIsBulkModalOpen(true)} 
+              icon={<Users className="w-4 h-4 text-sky-600" />}
+            >
+              Multi-Customer Delivery
+            </Button>
+            <Button onClick={() => openModal()} icon={<Plus className="w-4 h-4" />}>
+              Record Delivery
+            </Button>
+          </div>
         } 
       />
 
@@ -340,6 +449,262 @@ export default function Deliveries() {
           <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
             <Button variant="secondary" onClick={() => setIsModalOpen(false)}>Cancel</Button>
             <Button type="submit">{editingId ? 'Update Delivery' : 'Record & Send Slip'}</Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Multi-Customer Bulk Delivery Modal */}
+      <Modal 
+        isOpen={isBulkModalOpen} 
+        onClose={() => setIsBulkModalOpen(false)} 
+        title="Multi-Customer Delivery (Bulk Selection)" 
+        size="xl"
+      >
+        <form onSubmit={handleBulkSubmit} className="space-y-4">
+          {/* Date & Time */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 bg-gray-50/80 rounded-xl border border-gray-100">
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-1">Delivery Date</label>
+              <input
+                type="date"
+                value={bulkDate}
+                onChange={(e) => setBulkDate(e.target.value)}
+                required
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-sky-500/20"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-1">Delivery Time</label>
+              <input
+                type="time"
+                value={bulkTime}
+                onChange={(e) => setBulkTime(e.target.value)}
+                required
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-sky-500/20"
+              />
+            </div>
+          </div>
+
+          {/* Bottle Quantity & Payment Options */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 bg-sky-50/60 rounded-xl border border-sky-100">
+            <div>
+              <label className="block text-xs font-semibold text-sky-900 mb-1.5">Bottle Quantity Mode</label>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setBulkQtyMode('default')}
+                  className={`flex-1 py-1.5 px-2.5 rounded-lg text-xs font-bold transition-all ${
+                    bulkQtyMode === 'default'
+                      ? 'bg-sky-500 text-white shadow-xs'
+                      : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50'
+                  }`}
+                >
+                  Each Customer's Default
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBulkQtyMode('custom')}
+                  className={`flex-1 py-1.5 px-2.5 rounded-lg text-xs font-bold transition-all ${
+                    bulkQtyMode === 'custom'
+                      ? 'bg-sky-500 text-white shadow-xs'
+                      : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50'
+                  }`}
+                >
+                  Same Qty for All
+                </button>
+              </div>
+              {bulkQtyMode === 'custom' && (
+                <div className="flex items-center gap-2 mt-2">
+                  <span className="text-xs text-gray-600">Fixed bottles:</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={bulkCustomQty}
+                    onChange={(e) => setBulkCustomQty(Math.max(1, parseInt(e.target.value) || 1))}
+                    className="w-20 px-2 py-1 bg-white border border-gray-300 rounded-lg text-xs font-bold text-center"
+                  />
+                </div>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-sky-900 mb-1.5">Payment Status</label>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setBulkPaymentStatus('unpaid')}
+                  className={`flex-1 py-1.5 px-2.5 rounded-lg text-xs font-bold transition-all ${
+                    bulkPaymentStatus === 'unpaid'
+                      ? 'bg-rose-500 text-white shadow-xs'
+                      : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50'
+                  }`}
+                >
+                  Credit (Udhar)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBulkPaymentStatus('paid')}
+                  className={`flex-1 py-1.5 px-2.5 rounded-lg text-xs font-bold transition-all ${
+                    bulkPaymentStatus === 'paid'
+                      ? 'bg-emerald-500 text-white shadow-xs'
+                      : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50'
+                  }`}
+                >
+                  Paid Cash
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Customer Selection Filter & Search */}
+          <div className="space-y-2">
+            <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center justify-between">
+              <div className="flex-1">
+                <SearchInput
+                  value={bulkSearch}
+                  onChange={setBulkSearch}
+                  placeholder="Search customer by name, phone or area..."
+                />
+              </div>
+
+              {areas.length > 0 && (
+                <div className="flex items-center gap-1 overflow-x-auto pb-1 sm:pb-0">
+                  <button
+                    type="button"
+                    onClick={() => setBulkAreaFilter('all')}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold whitespace-nowrap transition-all ${
+                      bulkAreaFilter === 'all' ? 'bg-sky-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    }`}
+                  >
+                    All Areas
+                  </button>
+                  {areas.map(a => (
+                    <button
+                      key={a}
+                      type="button"
+                      onClick={() => setBulkAreaFilter(a)}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold whitespace-nowrap transition-all ${
+                        bulkAreaFilter === a ? 'bg-sky-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      {a}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Selection Toolbar */}
+            <div className="flex items-center justify-between px-1 py-1 text-xs">
+              <button
+                type="button"
+                onClick={selectAllBulkFiltered}
+                className="font-bold text-sky-600 hover:text-sky-700 flex items-center gap-1.5"
+              >
+                <CheckSquare className="w-3.5 h-3.5" />
+                <span>
+                  {bulkFilteredCustomers.length > 0 && bulkFilteredCustomers.every(c => bulkSelectedIds.includes(c.id))
+                    ? 'Deselect All Filtered'
+                    : `Select All Filtered (${bulkFilteredCustomers.length})`}
+                </span>
+              </button>
+
+              {bulkSelectedIds.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setBulkSelectedIds([])}
+                  className="text-gray-500 hover:text-gray-800 text-[11px] font-semibold flex items-center gap-1"
+                >
+                  <X className="w-3 h-3" />
+                  <span>Clear ({bulkSelectedIds.length})</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Customer Scroll List */}
+          <div className="max-h-60 overflow-y-auto border border-gray-200 rounded-xl divide-y divide-gray-100">
+            {bulkFilteredCustomers.length === 0 ? (
+              <div className="p-6 text-center text-xs text-gray-400">
+                Koi customer nahi mila. Search ya area filter tabdeel karein.
+              </div>
+            ) : (
+              bulkFilteredCustomers.map(c => {
+                const isSelected = bulkSelectedIds.includes(c.id);
+                const qty = bulkQtyMode === 'custom' ? bulkCustomQty : (c.quantity || 1);
+                const price = c.pricePerUnit || settings.defaultWaterPrice || 30;
+
+                return (
+                  <div
+                    key={c.id}
+                    onClick={() => toggleBulkCustomer(c.id)}
+                    className={`p-3 flex items-center justify-between cursor-pointer transition-colors ${
+                      isSelected ? 'bg-sky-50/70 hover:bg-sky-50' : 'bg-white hover:bg-gray-50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div
+                        className={`w-5 h-5 rounded flex items-center justify-center transition-all shrink-0 ${
+                          isSelected
+                            ? 'bg-sky-600 text-white'
+                            : 'border-2 border-gray-300 bg-white'
+                        }`}
+                      >
+                        {isSelected && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="font-bold text-xs text-gray-900 truncate">{c.name}</p>
+                          {c.area && (
+                            <span className="text-[10px] bg-sky-100 text-sky-700 font-semibold px-1.5 py-0.2 rounded">
+                              {c.area}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-gray-400 truncate">{c.phone}</p>
+                      </div>
+                    </div>
+
+                    <div className="text-right shrink-0">
+                      <span className="text-xs font-bold text-gray-800 block">
+                        {qty} bottles
+                      </span>
+                      <span className="text-[11px] text-sky-600 font-semibold">
+                        {fmt(qty * price)}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Summary Banner */}
+          <div className="p-3 bg-gradient-to-r from-sky-50 to-blue-50 border border-sky-100 rounded-xl flex items-center justify-between text-xs">
+            <div>
+              <span className="text-gray-500 font-medium">Selected: </span>
+              <strong className="text-sky-900 font-bold">{bulkSummary.count} Customers</strong>
+              <span className="text-gray-400 mx-1.5">•</span>
+              <strong className="text-sky-900 font-bold">{bulkSummary.bottles} Bottles</strong>
+            </div>
+            <div className="text-right">
+              <span className="text-gray-500 font-medium">Total: </span>
+              <strong className="text-emerald-700 font-black text-sm">{fmt(bulkSummary.totalAmt)}</strong>
+            </div>
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex justify-end gap-3 pt-3 border-t border-gray-100">
+            <Button variant="secondary" onClick={() => setIsBulkModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button 
+              type="submit" 
+              disabled={bulkSelectedIds.length === 0}
+              className="bg-sky-600 hover:bg-sky-700 text-white"
+            >
+              Deliver to ({bulkSelectedIds.length}) Selected Customers
+            </Button>
           </div>
         </form>
       </Modal>
