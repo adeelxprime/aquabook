@@ -1,13 +1,14 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate, Link } from 'react-router-dom';
 import { 
   LayoutDashboard, Users, Truck, CreditCard, BarChart3, 
   Settings, Menu, X, Droplets, ChevronLeft, LogOut, ShieldCheck, 
-  Sparkles, Calendar, MessageSquare, Smartphone, RefreshCw
+  Sparkles, Calendar, MessageSquare, Smartphone, RefreshCw, Wifi, WifiOff
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { getAuth, getBusinessById, logout } from '../services/adminService';
 import { isSupabaseConfigured } from '../services/supabaseClient';
+import { syncLocalDataToSupabase } from '../services/supabaseService';
 import PWAInstallBanner from './PWAInstallBanner';
 import toast from 'react-hot-toast';
 
@@ -49,6 +50,42 @@ export default function Layout() {
   };
 
   const daysLeft = business ? getDaysRemaining(business.subscription.endDate) : null;
+
+  // Online / Offline Status Tracking
+  const [isOnline, setIsOnline] = useState(() => (typeof navigator !== 'undefined' ? navigator.onLine : true));
+
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      toast.success('Internet Connected! Cloud se sync ho raha hai...', { id: 'online-toast' });
+      if (business?.id && isSupabaseConfigured()) {
+        syncLocalDataToSupabase(business.id)
+          .then((res) => {
+            if (res.success) {
+              toast.success('Data Supabase Cloud par update ho gaya!');
+            }
+          })
+          .catch(() => {});
+      }
+    };
+
+    const handleOffline = () => {
+      setIsOnline(false);
+      toast('Offline Mode Active. Aapka data phone me mehfooz save hota rahega.', {
+        icon: '📶',
+        id: 'offline-toast',
+        duration: 4000,
+      });
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [business?.id]);
 
   return (
     <div className="flex h-screen bg-gray-50/80 overflow-hidden">
@@ -170,6 +207,25 @@ export default function Layout() {
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3">
+            {/* Online / Offline Status Badge */}
+            {isOnline ? (
+              <div 
+                className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200/80 rounded-full text-xs font-semibold shadow-xs"
+                title="Internet Connected - Cloud Sync Active"
+              >
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="hidden sm:inline">Online</span>
+              </div>
+            ) : (
+              <div 
+                className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 text-amber-800 border border-amber-300 rounded-full text-xs font-bold shadow-xs animate-pulse"
+                title="Offline Mode - Phone me local khatta chal raha hai"
+              >
+                <WifiOff className="w-3.5 h-3.5 text-amber-600" />
+                <span>Offline Mode</span>
+              </div>
+            )}
+
             {/* 1-Click Cloud Sync Button */}
             <button
               onClick={() => syncFromCloud(true)}
