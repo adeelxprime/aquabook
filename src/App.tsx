@@ -15,6 +15,8 @@ import Reports from './pages/Reports';
 import SettingsPage from './pages/SettingsPage';
 import MonthlyBills from './pages/MonthlyBills';
 import QuickDelivery from './pages/QuickDelivery';
+import DeliveryBoys from './pages/DeliveryBoys';
+import TruckSupply from './pages/TruckSupply';
 
 // Auth & Admin Pages
 import Login from './pages/Login';
@@ -68,6 +70,8 @@ function App() {
           >
             <Route index element={<Dashboard />} />
             <Route path="quick-delivery" element={<QuickDelivery />} />
+            <Route path="delivery-boys" element={<DeliveryBoys />} />
+            <Route path="truck-supply" element={<TruckSupply />} />
             <Route path="customers" element={<Customers />} />
             <Route path="customers/:id" element={<CustomerDetail />} />
             <Route path="deliveries" element={<Deliveries />} />

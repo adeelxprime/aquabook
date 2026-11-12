@@ -3,7 +3,8 @@ import { NavLink, Outlet, useLocation, useNavigate, Link } from 'react-router-do
 import { 
   LayoutDashboard, Users, Truck, CreditCard, BarChart3, 
   Settings, Menu, X, Droplets, ChevronLeft, LogOut, ShieldCheck, 
-  Sparkles, Calendar, MessageSquare, Smartphone, RefreshCw, Wifi, WifiOff
+  Sparkles, Calendar, MessageSquare, Smartphone, RefreshCw, Wifi, WifiOff,
+  Bike, Fuel
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { getAuth, getBusinessById, logout } from '../services/adminService';
@@ -14,11 +15,13 @@ import toast from 'react-hot-toast';
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/quick-delivery', icon: Truck, label: "Today's Delivery Route" },
+  { to: '/quick-delivery', icon: Truck, label: "Today's Route" },
+  { to: '/delivery-boys', icon: Bike, label: 'Delivery Boys' },
+  { to: '/truck-supply', icon: Truck, label: 'Truck / Bulk Supply' },
   { to: '/customers', icon: Users, label: 'Customers' },
   { to: '/deliveries', icon: Calendar, label: 'All Deliveries' },
   { to: '/payments', icon: CreditCard, label: 'Payments' },
-  { to: '/monthly-bills', icon: MessageSquare, label: 'Monthly Bills (WhatsApp)' },
+  { to: '/monthly-bills', icon: MessageSquare, label: 'Monthly Bills' },
   { to: '/reports', icon: BarChart3, label: 'Reports' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];
@@ -33,6 +36,22 @@ export default function Layout() {
   const auth = getAuth();
   const business = auth.businessId ? getBusinessById(auth.businessId) : null;
   const isSuperAdmin = auth.userType === 'admin';
+  const isRider = auth.userType === 'delivery_boy';
+
+  // If rider visits root '/', redirect to quick-delivery
+  useEffect(() => {
+    if (isRider && location.pathname === '/') {
+      navigate('/quick-delivery', { replace: true });
+    }
+  }, [isRider, location.pathname, navigate]);
+
+  const riderNavItems = [
+    { to: '/quick-delivery', icon: Truck, label: "Today's Route" },
+    { to: '/customers', icon: Users, label: 'Customers' },
+    { to: '/deliveries', icon: Calendar, label: 'My Deliveries' },
+  ];
+
+  const activeNavItems = isRider ? riderNavItems : navItems;
 
   const handleLogout = () => {
     logout();
@@ -133,7 +152,7 @@ export default function Layout() {
 
         {/* Navigation */}
         <nav className="flex-1 py-3 px-3 space-y-1 overflow-y-auto">
-          {navItems.map(item => (
+          {activeNavItems.map(item => (
             <NavLink
               key={item.to}
               to={item.to}
@@ -200,9 +219,14 @@ export default function Layout() {
               <h2 className="text-sm font-bold text-gray-800">
                 {business?.businessName || settings.businessName || 'AquaBook'}
               </h2>
-              {business?.ownerName && (
+              {isRider ? (
+                <p className="text-[11px] text-sky-600 font-bold flex items-center gap-1">
+                  <Bike className="w-3.5 h-3.5" />
+                  <span>Rider: {auth.deliveryBoyName || 'Delivery Boy'} (Active 🚴)</span>
+                </p>
+              ) : business?.ownerName ? (
                 <p className="text-[11px] text-gray-400">Owner: {business.ownerName}</p>
-              )}
+              ) : null}
             </div>
           </div>
 
@@ -281,7 +305,7 @@ export default function Layout() {
         {/* Mobile Bottom Navigation Bar */}
         <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 z-30">
           <div className="flex justify-around items-center h-16 px-2">
-            {navItems.slice(0, 5).map(item => (
+            {activeNavItems.slice(0, 5).map(item => (
               <NavLink
                 key={item.to}
                 to={item.to}

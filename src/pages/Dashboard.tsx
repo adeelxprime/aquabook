@@ -4,15 +4,19 @@ import { useApp } from '../context/AppContext';
 import { StatCard, Card, Button, StatusBadge, EmptyState } from '../components/ui';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { getDeliveryChartData, getRecentDeliveries, getRecentCustomers } from '../services/dataService';
-import { Users, Truck, DollarSign, AlertCircle, TrendingUp, Plus, CreditCard, List, Droplets, RefreshCw } from 'lucide-react';
+import { 
+  Users, Truck, DollarSign, AlertCircle, TrendingUp, Plus, 
+  CreditCard, List, Droplets, RefreshCw, Check, X, Clock, 
+  Bike, Sparkles, ExternalLink 
+} from 'lucide-react';
 import { format } from 'date-fns';
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { stats, settings, deliveries, customers, syncFromCloud, isSyncing } = useApp();
+  const { stats, settings, deliveries, customers, deliveryBoys, truckSupplies, syncFromCloud, isSyncing } = useApp();
 
   const chartData = useMemo(() => getDeliveryChartData(7), [deliveries]);
-  const recentDeliveries = useMemo(() => getRecentDeliveries(5), [deliveries]);
+  const recentDeliveries = useMemo(() => getRecentDeliveries(6), [deliveries]);
   const recentCustomers = useMemo(() => getRecentCustomers(5), [customers]);
 
   const fmt = (v: number) => `${settings.currencySymbol}${v.toLocaleString()}`;
@@ -23,7 +27,7 @@ export default function Dashboard() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-          <p className="text-gray-500 text-sm mt-0.5">Welcome back! Here's your business overview.</p>
+          <p className="text-gray-500 text-sm mt-0.5">Welcome back! Live water delivery & fleet monitor.</p>
         </div>
         <Button 
           variant="secondary" 
@@ -45,20 +49,111 @@ export default function Dashboard() {
         <StatCard label="Total Outstanding" value={fmt(stats.totalOutstanding)} icon={<DollarSign className="w-5 h-5" />} color="violet" />
       </div>
 
+      {/* Live Route Delivery Status Bar (Owner Live Monitor) */}
+      <Card className="p-4 bg-gradient-to-r from-sky-950 via-slate-900 to-blue-950 text-white shadow-xl">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+              <h3 className="text-sm font-bold text-white tracking-wide uppercase">
+                Owner Live Route Monitor
+              </h3>
+            </div>
+            <p className="text-xs text-sky-200/80">
+              Real-time delivery progress across all delivery boys and bulk truck trips
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => navigate('/quick-delivery')}
+              className="px-3.5 py-1.5 bg-sky-500 hover:bg-sky-400 text-white text-xs font-bold rounded-xl shadow-xs transition-all flex items-center gap-1.5"
+            >
+              <span>Live Delivery Register</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => navigate('/delivery-boys')}
+              className="px-3.5 py-1.5 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded-xl transition-all flex items-center gap-1.5"
+            >
+              <Bike className="w-3.5 h-3.5" />
+              <span>Riders ({deliveryBoys.length})</span>
+            </button>
+          </div>
+        </div>
+
+        {/* 4 Live Monitor Cards */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 pt-4 border-t border-white/10">
+          <div className="p-3 bg-white/5 rounded-xl border border-white/10">
+            <span className="text-[10px] font-bold text-emerald-400 uppercase flex items-center gap-1">
+              <Check className="w-3 h-3 stroke-[3]" /> Delivered (Tick Mark)
+            </span>
+            <p className="text-xl font-black text-white mt-0.5">
+              {stats.todayDeliveries} <span className="text-xs font-normal text-emerald-200">stops</span>
+            </p>
+            <span className="text-[11px] text-emerald-300 font-semibold block mt-0.5">
+              {stats.todayBottlesDelivered} Bottles Delivered
+            </span>
+          </div>
+
+          <div className="p-3 bg-white/5 rounded-xl border border-white/10">
+            <span className="text-[10px] font-bold text-rose-400 uppercase flex items-center gap-1">
+              <X className="w-3 h-3 stroke-[3]" /> Pani Nahi Gya (Cross)
+            </span>
+            <p className="text-xl font-black text-white mt-0.5">
+              {stats.todaySkippedDeliveries || 0} <span className="text-xs font-normal text-rose-200">stops</span>
+            </p>
+            <span className="text-[11px] text-rose-300 font-semibold block mt-0.5">
+              Skipped / Missed today
+            </span>
+          </div>
+
+          <div className="p-3 bg-white/5 rounded-xl border border-white/10">
+            <span className="text-[10px] font-bold text-amber-400 uppercase flex items-center gap-1">
+              <Sparkles className="w-3 h-3" /> Extra Bottles (🍾)
+            </span>
+            <p className="text-xl font-black text-white mt-0.5">
+              +{stats.todayExtraBottles || 0} <span className="text-xs font-normal text-amber-200">bottles</span>
+            </p>
+            <span className="text-[11px] text-amber-300 font-semibold block mt-0.5">
+              On-demand extra orders
+            </span>
+          </div>
+
+          <div className="p-3 bg-white/5 rounded-xl border border-white/10">
+            <span className="text-[10px] font-bold text-sky-400 uppercase flex items-center gap-1">
+              <Truck className="w-3 h-3" /> Truck / Tanker Trips
+            </span>
+            <p className="text-xl font-black text-white mt-0.5">
+              {stats.todayTruckTrips || 0} <span className="text-xs font-normal text-sky-200">dispatches</span>
+            </p>
+            <span className="text-[11px] text-sky-300 font-semibold block mt-0.5">
+              Bulk tanker & container
+            </span>
+          </div>
+        </div>
+      </Card>
+
       {/* Quick Actions */}
       <Card className="p-5">
-        <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4">Quick Actions (VodaBook Khatta)</h3>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4">Quick Operations</h3>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           <Button onClick={() => navigate('/quick-delivery')} icon={<Truck className="w-4 h-4" />}>
-            Today Route Khatta
+            Route Register
           </Button>
-          <Button onClick={() => navigate('/monthly-bills')} variant="secondary" icon={<Droplets className="w-4 h-4" />}>
-            Monthly WhatsApp Bills
+          <Button onClick={() => navigate('/delivery-boys')} variant="secondary" icon={<Bike className="w-4 h-4 text-sky-600" />}>
+            Delivery Boys
+          </Button>
+          <Button onClick={() => navigate('/truck-supply')} variant="secondary" icon={<Truck className="w-4 h-4 text-indigo-600" />}>
+            Truck / Bulk
+          </Button>
+          <Button onClick={() => navigate('/monthly-bills')} variant="secondary" icon={<Droplets className="w-4 h-4 text-sky-600" />}>
+            WhatsApp Bills
           </Button>
           <Button onClick={() => navigate('/customers')} variant="secondary" icon={<Plus className="w-4 h-4" />}>
             Add Customer
           </Button>
-          <Button onClick={() => navigate('/payments')} variant="secondary" icon={<CreditCard className="w-4 h-4" />}>
+          <Button onClick={() => navigate('/payments')} variant="secondary" icon={<CreditCard className="w-4 h-4 text-emerald-600" />}>
             Add Payment
           </Button>
         </div>
@@ -112,21 +207,55 @@ export default function Dashboard() {
       {/* Recent Activity */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card className="p-5">
-          <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4">Recent Deliveries</h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider">Recent Deliveries</h3>
+            <button onClick={() => navigate('/deliveries')} className="text-xs font-bold text-sky-600 hover:text-sky-700">
+              View All
+            </button>
+          </div>
           {recentDeliveries.length > 0 ? (
             <div className="divide-y divide-gray-50">
-              {recentDeliveries.map((d) => (
-                <div key={d.id} className="py-3 flex items-center justify-between">
-                  <div>
-                    <p className="font-medium text-gray-900 text-sm">{d.customerName}</p>
-                    <p className="text-xs text-gray-500">{format(new Date(d.date), 'MMM d, yyyy')} • {d.quantity} × {d.waterType}</p>
+              {recentDeliveries.map((d) => {
+                const isSkipped = d.status === 'skipped';
+                return (
+                  <div key={d.id} className="py-3 flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <p className="font-semibold text-gray-900 text-sm">{d.customerName}</p>
+                        {isSkipped ? (
+                          <span className="px-2 py-0.2 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 flex items-center gap-0.5">
+                            <X className="w-2.5 h-2.5 stroke-[3]" /> Pani Nahi Gya
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.2 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 flex items-center gap-0.5">
+                            <Check className="w-2.5 h-2.5 stroke-[3]" /> Delivered
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {format(new Date(d.date), 'MMM d, yyyy')} at {d.time}
+                        {d.deliveryBoyName ? ` • 🛵 ${d.deliveryBoyName}` : ''}
+                      </p>
+                      {isSkipped && d.skipReason ? (
+                        <p className="text-[11px] text-rose-600 font-semibold mt-0.5">
+                          Wajah: {d.skipReason}
+                        </p>
+                      ) : null}
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {!isSkipped && (
+                        <div className="text-right">
+                          <span className="text-sm font-bold text-gray-900 block">{fmt(d.totalPrice)}</span>
+                          <span className="text-[11px] text-gray-400 font-medium">
+                            {d.quantity} Jars {d.extraBottles ? `(+${d.extraBottles} Extra)` : ''}
+                          </span>
+                        </div>
+                      )}
+                      <StatusBadge status={d.paymentStatus} />
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-sm font-semibold text-gray-900">{fmt(d.totalPrice)}</span>
-                    <StatusBadge status={d.paymentStatus} />
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <EmptyState icon={<Truck className="w-8 h-8" />} title="No deliveries yet" description="Record your first delivery to see it here." />
@@ -134,7 +263,12 @@ export default function Dashboard() {
         </Card>
 
         <Card className="p-5">
-          <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4">Recent Customers</h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider">Recent Customers</h3>
+            <button onClick={() => navigate('/customers')} className="text-xs font-bold text-sky-600 hover:text-sky-700">
+              View All
+            </button>
+          </div>
           {recentCustomers.length > 0 ? (
             <div className="divide-y divide-gray-50">
               {recentCustomers.map((c) => (
@@ -145,7 +279,7 @@ export default function Dashboard() {
                     </div>
                     <div>
                       <p className="font-medium text-gray-900 text-sm">{c.name}</p>
-                      <p className="text-xs text-gray-500">{c.phone}</p>
+                      <p className="text-xs text-gray-500">{c.phone}{c.area ? ` • ${c.area}` : ''}</p>
                     </div>
                   </div>
                   <StatusBadge status={c.status} />

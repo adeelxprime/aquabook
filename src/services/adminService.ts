@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { AdminUser, Business, SubscriptionPayment, AdminDashboardStats, AuthState } from '../types/admin';
+import type { DeliveryBoy } from '../types';
 import { setCurrentBusiness } from './dataService';
 import { fetchBusinessesFromSupabase, upsertBusinessToSupabase } from './supabaseService';
 
@@ -146,6 +147,87 @@ export async function loginBusiness(username: string, password: string): Promise
 
   setAuth({ isAuthenticated: true, userType: 'business', userId: updated.id, businessId: updated.id });
   return { success: true, message: 'Login successful', business: updated };
+}
+
+export function loginDeliveryBoy(usernameOrPhone: string, passwordOrPin: string): { success: boolean; message: string; deliveryBoy?: DeliveryBoy; business?: Business } {
+  const cleanInput = usernameOrPhone.trim().toLowerCase();
+  const cleanPass = passwordOrPin.trim();
+
+  // 1. Search through all businesses' delivery boys
+  const businesses = getBusinesses();
+  
+  for (const biz of businesses) {
+    const rawBoys = localStorage.getItem(`aquabook_delivery_boys_${biz.id}`);
+    if (!rawBoys) continue;
+    try {
+      const boys: DeliveryBoy[] = JSON.parse(rawBoys);
+      const match = boys.find(b => {
+        const matchesUser = (b.username && b.username.toLowerCase() === cleanInput) ||
+                            (b.phone && b.phone.replace(/[^0-9]/g, '') === cleanInput.replace(/[^0-9]/g, '')) ||
+                            (b.name && b.name.toLowerCase() === cleanInput);
+        const matchesPass = (b.password && b.password === cleanPass) ||
+                            (!b.password && cleanPass === '1234'); // default pin 1234 if not configured
+        return matchesUser && matchesPass;
+      });
+
+      if (match) {
+        if (match.status !== 'active') {
+          return { success: false, message: 'Yeh delivery boy account inactive (off duty) hai. Owner se rabta karein.' };
+        }
+        if (biz.isActive === false || biz.subscription?.status === 'inactive' || biz.subscription?.status === 'expired') {
+          return { success: false, message: 'Water plant subscription inactive hai. Plant owner se rabta karein.' };
+        }
+
+        setAuth({
+          isAuthenticated: true,
+          userType: 'delivery_boy',
+          userId: match.id,
+          businessId: biz.id,
+          deliveryBoyId: match.id,
+          deliveryBoyName: match.name,
+        });
+        setCurrentBusiness(biz.id);
+        return { success: true, message: `Welcome ${match.name}!`, deliveryBoy: match, business: biz };
+      }
+    } catch {
+      // ignore parse errors
+    }
+  }
+
+  // 2. Also check default un-prefixed storage (single tenant / legacy)
+  try {
+    const rawBoys = localStorage.getItem('aquabook_delivery_boys');
+    if (rawBoys) {
+      const boys: DeliveryBoy[] = JSON.parse(rawBoys);
+      const match = boys.find(b => {
+        const matchesUser = (b.username && b.username.toLowerCase() === cleanInput) ||
+                            (b.phone && b.phone.replace(/[^0-9]/g, '') === cleanInput.replace(/[^0-9]/g, '')) ||
+                            (b.name && b.name.toLowerCase() === cleanInput);
+        const matchesPass = (b.password && b.password === cleanPass) ||
+                            (!b.password && cleanPass === '1234');
+        return matchesUser && matchesPass;
+      });
+      if (match) {
+        const defaultBiz = businesses[0];
+        const bizId = defaultBiz?.id || 'biz-default';
+        setAuth({
+          isAuthenticated: true,
+          userType: 'delivery_boy',
+          userId: match.id,
+          businessId: bizId,
+          deliveryBoyId: match.id,
+          deliveryBoyName: match.name,
+        });
+        setCurrentBusiness(bizId);
+        return { success: true, message: `Welcome ${match.name}!`, deliveryBoy: match, business: defaultBiz };
+      }
+    }
+  } catch {}
+
+  return { 
+    success: false, 
+    message: 'Delivery boy username / mobile number ya password ghalat hai. Owner se credentials check karein.' 
+  };
 }
 
 export function loginAsBusiness(businessId: string): boolean {

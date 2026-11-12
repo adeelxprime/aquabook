@@ -5,13 +5,14 @@ import { PageHeader, Card, Button, SearchInput, Modal, ConfirmDialog, FormInput,
 import { Users, Plus, Edit, Trash2, Eye, Phone, MapPin, RefreshCw } from 'lucide-react';
 import { format } from 'date-fns';
 import { getDeliveriesByCustomer } from '../services/dataService';
+import { getAuth } from '../services/adminService';
 import toast from 'react-hot-toast';
 
 export default function Customers() {
   const navigate = useNavigate();
   const { 
     customers, addCustomer, updateCustomer, deleteCustomer, 
-    getCustomerBalance, settings, syncFromCloud, isSyncing 
+    getCustomerBalance, deliveryBoys, settings, syncFromCloud, isSyncing 
   } = useApp();
 
   const [search, setSearch] = useState('');
@@ -20,21 +21,43 @@ export default function Customers() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [selectedBlock, setSelectedBlock] = useState('all');
+
+  const auth = getAuth();
+  const isDeliveryBoy = auth.userType === 'delivery_boy';
 
   // Form state
   const [form, setForm] = useState({
-    name: '', phone: '', address: '', area: '', waterType: 'Regular',
+    name: '', phone: '', address: '', area: '', 
+    block: '', building: '', floor: '', houseNo: '',
+    waterType: 'Regular',
     quantity: 1, pricePerUnit: settings.defaultWaterPrice,
-    status: 'active' as 'active' | 'inactive', notes: '',
+    status: 'active' as 'active' | 'inactive', 
+    assignedDeliveryBoyId: '',
+    assignedDeliveryBoyName: '',
+    notes: '',
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // Unique blocks across active customers
+  const distinctBlocks = useMemo(() => {
+    const set = new Set<string>();
+    customers.forEach(c => {
+      if (c.block && c.block.trim()) set.add(c.block.trim());
+    });
+    return Array.from(set);
+  }, [customers]);
 
   const filtered = useMemo(() => {
     let list = customers.filter(c => {
       const matchSearch = !search || c.name.toLowerCase().includes(search.toLowerCase()) ||
-        c.phone.toLowerCase().includes(search.toLowerCase()) || c.address.toLowerCase().includes(search.toLowerCase());
+        c.phone.toLowerCase().includes(search.toLowerCase()) || 
+        c.address.toLowerCase().includes(search.toLowerCase()) ||
+        (c.block && c.block.toLowerCase().includes(search.toLowerCase())) ||
+        (c.building && c.building.toLowerCase().includes(search.toLowerCase()));
       const matchFilter = filter === 'all' || c.status === filter;
-      return matchSearch && matchFilter;
+      const matchBlock = selectedBlock === 'all' || c.block === selectedBlock;
+      return matchSearch && matchFilter && matchBlock;
     });
 
     list.sort((a, b) => {
@@ -47,22 +70,42 @@ export default function Customers() {
       }
     });
     return list;
-  }, [customers, search, filter, sort, getCustomerBalance]);
+  }, [customers, search, filter, selectedBlock, sort, getCustomerBalance]);
 
   const fmt = (v: number) => `${settings.currencySymbol}${v.toLocaleString()}`;
 
   const openAdd = () => {
+    if (isDeliveryBoy) {
+      toast.error('Naya customer sirf Plant Owner add kar sakta hai.');
+      return;
+    }
     setEditingCustomer(null);
-    setForm({ name: '', phone: '', address: '', area: '', waterType: 'Regular', quantity: 1, pricePerUnit: settings.defaultWaterPrice, status: 'active', notes: '' });
+    setForm({ 
+      name: '', phone: '', address: '', area: '', 
+      block: '', building: '', floor: '', houseNo: '',
+      waterType: 'Regular', 
+      quantity: 1, pricePerUnit: settings.defaultWaterPrice, status: 'active', 
+      assignedDeliveryBoyId: '', assignedDeliveryBoyName: '', notes: '' 
+    });
     setErrors({});
     setIsModalOpen(true);
   };
 
   const openEdit = (id: string) => {
+    if (isDeliveryBoy) {
+      toast.error('Aapko customer details ya rate edit karne ki ijazat nahi hai. Yeh sirf Owner kar sakta hai.');
+      return;
+    }
     const c = customers.find(x => x.id === id);
     if (!c) return;
     setEditingCustomer(id);
-    setForm({ name: c.name, phone: c.phone, address: c.address, area: c.area || '', waterType: c.waterType, quantity: c.quantity, pricePerUnit: c.pricePerUnit, status: c.status, notes: c.notes });
+    setForm({ 
+      name: c.name, phone: c.phone, address: c.address, area: c.area || '', 
+      block: c.block || '', building: c.building || '', floor: c.floor || '', houseNo: c.houseNo || '',
+      waterType: c.waterType, quantity: c.quantity, pricePerUnit: c.pricePerUnit, 
+      status: c.status, assignedDeliveryBoyId: c.assignedDeliveryBoyId || '', 
+      assignedDeliveryBoyName: c.assignedDeliveryBoyName || '', notes: c.notes || '' 
+    });
     setErrors({});
     setIsModalOpen(true);
   };
@@ -80,6 +123,10 @@ export default function Customers() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isDeliveryBoy) {
+      toast.error('Aapko customer details edit karne ki ijazat nahi hai.');
+      return;
+    }
     if (!validate()) return;
     if (editingCustomer) {
       updateCustomer(editingCustomer, form);
@@ -92,6 +139,10 @@ export default function Customers() {
   };
 
   const handleDelete = () => {
+    if (isDeliveryBoy) {
+      toast.error('Customer delete karne ki ijazat sirf Plant Owner ke pas hai.');
+      return;
+    }
     if (deleteId) {
       deleteCustomer(deleteId);
       toast.success('Customer deleted');
@@ -120,17 +171,31 @@ export default function Customers() {
             >
               {isSyncing ? 'Syncing...' : 'Sync Cloud'}
             </Button>
-            <Button onClick={openAdd} icon={<Plus className="w-4 h-4" />}>Add Customer</Button>
+            {!isDeliveryBoy && (
+              <Button onClick={openAdd} icon={<Plus className="w-4 h-4" />}>Add Customer</Button>
+            )}
           </div>
         }
       />
 
       {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-3">
-        <SearchInput value={search} onChange={setSearch} placeholder="Search by name, phone, address..." className="flex-1" />
-        <div className="flex gap-2">
+        <SearchInput value={search} onChange={setSearch} placeholder="Search by name, phone, address, block, building..." className="flex-1" />
+        <div className="flex flex-wrap gap-2">
+          {distinctBlocks.length > 0 && (
+            <select
+              value={selectedBlock}
+              onChange={(e) => setSelectedBlock(e.target.value)}
+              className="px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-semibold text-gray-700 focus:outline-none focus:ring-2 focus:ring-sky-500/20"
+            >
+              <option value="all">🏢 All Blocks</option>
+              {distinctBlocks.map(blk => (
+                <option key={blk} value={blk}>🏢 {blk}</option>
+              ))}
+            </select>
+          )}
           <select value={filter} onChange={(e) => setFilter(e.target.value as any)} className="px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/20">
-            <option value="all">All</option>
+            <option value="all">All Status</option>
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
           </select>
@@ -163,9 +228,11 @@ export default function Customers() {
             >
               {isSyncing ? 'Loading from Cloud...' : 'Cloud Se Load Karein (Sync)'}
             </Button>
-            <Button onClick={openAdd} icon={<Plus className="w-4 h-4" />}>
-              Naya Customer Banayein
-            </Button>
+            {!isDeliveryBoy && (
+              <Button onClick={openAdd} icon={<Plus className="w-4 h-4" />}>
+                Naya Customer Banayein
+              </Button>
+            )}
           </div>
         </div>
       ) : (
@@ -202,7 +269,12 @@ export default function Customers() {
                           </td>
                           <td className="px-5 py-4">
                             <div className="text-sm text-gray-600">{c.phone}</div>
-                            <div className="text-xs text-gray-400 truncate max-w-[200px]">{c.address}</div>
+                            <div className="text-xs text-gray-500 truncate max-w-[220px]">
+                              {c.block ? <span className="font-bold text-sky-700 bg-sky-50 px-1 py-0.2 rounded mr-1">[{c.block}]</span> : null}
+                              {c.building ? `${c.building}, ` : ''}
+                              {c.houseNo ? `${c.houseNo}, ` : ''}
+                              {c.address}
+                            </div>
                           </td>
                           <td className="px-5 py-4 text-sm">
                             <div>{c.quantity} × {c.waterType}</div>
@@ -220,8 +292,12 @@ export default function Customers() {
                           <td className="px-5 py-4">
                             <div className="flex items-center justify-end gap-1">
                               <button onClick={() => navigate(`/customers/${c.id}`)} className="p-2 hover:bg-gray-100 rounded-lg transition-colors" title="View"><Eye className="w-4 h-4 text-gray-500" /></button>
-                              <button onClick={() => openEdit(c.id)} className="p-2 hover:bg-gray-100 rounded-lg transition-colors" title="Edit"><Edit className="w-4 h-4 text-gray-500" /></button>
-                              <button onClick={() => setDeleteId(c.id)} className="p-2 hover:bg-red-50 rounded-lg transition-colors" title="Delete"><Trash2 className="w-4 h-4 text-red-400" /></button>
+                              {!isDeliveryBoy && (
+                                <>
+                                  <button onClick={() => openEdit(c.id)} className="p-2 hover:bg-gray-100 rounded-lg transition-colors" title="Edit"><Edit className="w-4 h-4 text-gray-500" /></button>
+                                  <button onClick={() => setDeleteId(c.id)} className="p-2 hover:bg-red-50 rounded-lg transition-colors" title="Delete"><Trash2 className="w-4 h-4 text-red-400" /></button>
+                                </>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -255,17 +331,27 @@ export default function Customers() {
                     </span>
                   </div>
                   <div className="space-y-1 text-sm text-gray-500">
-                    <div className="flex items-center gap-2"><Phone className="w-3.5 h-3.5" />{c.phone}</div>
-                    <div className="flex items-center gap-2"><MapPin className="w-3.5 h-3.5" /><span className="truncate">{c.address}</span></div>
+                    <div className="flex items-center gap-2"><Phone className="w-3.5 h-3.5 text-gray-400" />{c.phone}</div>
+                    <div className="flex items-start gap-2">
+                      <MapPin className="w-3.5 h-3.5 text-gray-400 shrink-0 mt-0.5" />
+                      <div className="text-xs text-gray-600 truncate">
+                        {c.block ? <span className="font-bold text-sky-700 bg-sky-50 px-1 py-0.2 rounded mr-1">[{c.block}]</span> : null}
+                        {c.building ? `${c.building}, ` : ''}
+                        {c.houseNo ? `${c.houseNo}, ` : ''}
+                        <span>{c.address}</span>
+                      </div>
+                    </div>
                   </div>
                   <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-50">
                     <span className="text-xs text-gray-400">{c.quantity} × {c.waterType} @ {fmt(c.pricePerUnit)}</span>
                     <span className="text-xs text-gray-400">{lastDel ? format(new Date(lastDel.date), 'MMM d') : 'No deliveries'}</span>
                   </div>
-                  <div className="flex gap-2 mt-3" onClick={(e) => e.stopPropagation()}>
-                    <Button size="sm" variant="secondary" onClick={() => openEdit(c.id)} icon={<Edit className="w-3.5 h-3.5" />} className="flex-1">Edit</Button>
-                    <Button size="sm" variant="danger" onClick={() => setDeleteId(c.id)} icon={<Trash2 className="w-3.5 h-3.5" />} className="flex-1">Delete</Button>
-                  </div>
+                  {!isDeliveryBoy && (
+                    <div className="flex gap-2 mt-3" onClick={(e) => e.stopPropagation()}>
+                      <Button size="sm" variant="secondary" onClick={() => openEdit(c.id)} icon={<Edit className="w-3.5 h-3.5" />} className="flex-1">Edit</Button>
+                      <Button size="sm" variant="danger" onClick={() => setDeleteId(c.id)} icon={<Trash2 className="w-3.5 h-3.5" />} className="flex-1">Delete</Button>
+                    </div>
+                  )}
                 </Card>
               );
             })}
@@ -281,8 +367,38 @@ export default function Customers() {
             <FormInput label="Phone" value={form.phone} onChange={(v) => setForm({ ...form, phone: v })} required error={errors.phone} placeholder="Phone number" />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <FormInput label="Address" value={form.address} onChange={(v) => setForm({ ...form, address: v })} required error={errors.address} placeholder="Street or house address" />
-            <FormInput label="Area / Route" value={form.area} onChange={(v) => setForm({ ...form, area: v })} placeholder="e.g. Sector 14, Main Market, Block B" />
+            <FormInput label="Full Address / Landmark" value={form.address} onChange={(v) => setForm({ ...form, address: v })} required error={errors.address} placeholder="Street or landmark" />
+            <FormInput label="Area / Society Name" value={form.area} onChange={(v) => setForm({ ...form, area: v })} placeholder="e.g. Gulberg, Bahria Town, DHA" />
+          </div>
+
+          {/* Block-wise & Building-wise Routing Info */}
+          <div className="p-3.5 bg-gradient-to-r from-sky-50/80 to-blue-50/80 border border-sky-200/80 rounded-2xl space-y-2.5">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-sky-900 uppercase tracking-wider">
+              <span>🏢 Block & Building-Wise Route Sequence</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <FormInput 
+                label="Block / Sector" 
+                value={form.block || ''} 
+                onChange={(v) => setForm({ ...form, block: v })} 
+                placeholder="e.g. R-Block, Block B" 
+              />
+              <FormInput 
+                label="Building / Street" 
+                value={form.building || ''} 
+                onChange={(v) => setForm({ ...form, building: v })} 
+                placeholder="e.g. Building 12, Street 4" 
+              />
+              <FormInput 
+                label="House / Flat / Floor #" 
+                value={form.houseNo || ''} 
+                onChange={(v) => setForm({ ...form, houseNo: v })} 
+                placeholder="e.g. House 45, Flat 3B" 
+              />
+            </div>
+            <p className="text-[11px] text-sky-700">
+              Delivery boy route par block ke hisab se ghar-ba-ghar asani se deliver karega.
+            </p>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <FormInput label="Water Type" value={form.waterType} onChange={(v) => setForm({ ...form, waterType: v })} placeholder="e.g. Regular, RO" />
@@ -291,7 +407,30 @@ export default function Customers() {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <FormSelect label="Status" value={form.status} onChange={(v) => setForm({ ...form, status: v as 'active' | 'inactive' })} options={[{ value: 'active', label: 'Active' }, { value: 'inactive', label: 'Inactive' }]} />
-            <div />
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                Default Delivery Rider
+              </label>
+              <select
+                value={form.assignedDeliveryBoyId}
+                onChange={e => {
+                  const boy = deliveryBoys.find(b => b.id === e.target.value);
+                  setForm(prev => ({
+                    ...prev,
+                    assignedDeliveryBoyId: e.target.value,
+                    assignedDeliveryBoyName: boy?.name || '',
+                  }));
+                }}
+                className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/20"
+              >
+                <option value="">-- No Specific Rider (Auto / Area) --</option>
+                {deliveryBoys.map(b => (
+                  <option key={b.id} value={b.id}>
+                    🛵 {b.name}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
           <FormTextarea label="Notes" value={form.notes} onChange={(v) => setForm({ ...form, notes: v })} placeholder="Any additional notes..." />
           <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">

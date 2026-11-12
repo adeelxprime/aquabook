@@ -100,7 +100,7 @@ export function EmptyState({ icon, title, description, action }: EmptyStateProps
 
 // ==================== Status Badge ====================
 interface StatusBadgeProps {
-  status: 'paid' | 'partial' | 'unpaid' | 'active' | 'inactive';
+  status: 'paid' | 'partial' | 'unpaid' | 'active' | 'inactive' | 'delivered' | 'skipped' | 'in_transit';
   size?: 'sm' | 'md';
 }
 
@@ -111,7 +111,10 @@ export function StatusBadge({ status, size = 'sm' }: StatusBadgeProps) {
     unpaid: { bg: 'bg-red-50 text-red-700', label: 'Unpaid' },
     active: { bg: 'bg-emerald-50 text-emerald-700', label: 'Active' },
     inactive: { bg: 'bg-gray-100 text-gray-600', label: 'Inactive' },
-  }[status];
+    delivered: { bg: 'bg-emerald-100 text-emerald-800 font-bold', label: 'Delivered (Pani Gya)' },
+    skipped: { bg: 'bg-rose-100 text-rose-800 font-bold', label: 'Missed (Pani Nahi Gya)' },
+    in_transit: { bg: 'bg-blue-100 text-blue-800 font-bold', label: 'In Transit' },
+  }[status] || { bg: 'bg-gray-100 text-gray-700', label: status };
   const sizeClass = size === 'sm' ? 'text-xs px-2 py-0.5' : 'text-sm px-3 py-1';
 
   return <span className={`inline-flex items-center font-medium rounded-full ${config.bg} ${sizeClass}`}>{config.label}</span>;

@@ -52,7 +52,9 @@ export interface AdminDashboardStats {
 
 export interface AuthState {
   isAuthenticated: boolean;
-  userType: 'admin' | 'business' | null;
+  userType: 'admin' | 'business' | 'delivery_boy' | null;
   userId: string | null;
   businessId: string | null;
+  deliveryBoyId?: string | null;
+  deliveryBoyName?: string | null;
 }

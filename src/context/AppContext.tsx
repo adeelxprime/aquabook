@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
-import type { Customer, Delivery, Payment, Settings, DashboardStats } from '../types';
+import type { Customer, Delivery, Payment, Settings, DashboardStats, DeliveryBoy, TruckSupply } from '../types';
 import * as db from '../services/dataService';
 import { getAuth } from '../services/adminService';
 import { 
@@ -16,6 +16,8 @@ interface AppContextType {
   customers: Customer[];
   deliveries: Delivery[];
   payments: Payment[];
+  deliveryBoys: DeliveryBoy[];
+  truckSupplies: TruckSupply[];
   settings: Settings;
   stats: DashboardStats;
   isSyncing: boolean;
@@ -25,6 +27,8 @@ interface AppContextType {
   refreshCustomers: () => void;
   refreshDeliveries: () => void;
   refreshPayments: () => void;
+  refreshDeliveryBoys: () => void;
+  refreshTruckSupplies: () => void;
   refreshStats: () => void;
   syncFromCloud: (showToast?: boolean) => Promise<{ success: boolean; message: string }>;
 
@@ -37,6 +41,26 @@ interface AppContextType {
   addDelivery: (delivery: Omit<Delivery, 'id' | 'createdAt' | 'updatedAt'>) => Delivery;
   updateDelivery: (id: string, updates: Partial<Delivery>) => Delivery | null;
   deleteDelivery: (id: string) => boolean;
+  recordSkippedDelivery: (params: {
+    customerId: string;
+    customerName: string;
+    date: string;
+    time: string;
+    skipReason: string;
+    deliveryBoyId?: string;
+    deliveryBoyName?: string;
+    notes?: string;
+  }) => Delivery;
+
+  // Delivery Boy actions
+  addDeliveryBoy: (boy: Omit<DeliveryBoy, 'id' | 'createdAt' | 'updatedAt'>) => DeliveryBoy;
+  updateDeliveryBoy: (id: string, updates: Partial<DeliveryBoy>) => DeliveryBoy | null;
+  deleteDeliveryBoy: (id: string) => boolean;
+
+  // Truck / Container actions
+  addTruckSupply: (supply: Omit<TruckSupply, 'id' | 'createdAt' | 'updatedAt'>) => TruckSupply;
+  updateTruckSupply: (id: string, updates: Partial<TruckSupply>) => TruckSupply | null;
+  deleteTruckSupply: (id: string) => boolean;
 
   // Payment actions
   addPayment: (payment: Omit<Payment, 'id' | 'createdAt' | 'updatedAt'>) => Payment;
@@ -63,6 +87,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [customers, setCustomers] = useState<Customer[]>(() => db.getCustomers());
   const [deliveries, setDeliveries] = useState<Delivery[]>(() => db.getDeliveries());
   const [payments, setPayments] = useState<Payment[]>(() => db.getPayments());
+  const [deliveryBoys, setDeliveryBoys] = useState<DeliveryBoy[]>(() => db.getDeliveryBoys());
+  const [truckSupplies, setTruckSupplies] = useState<TruckSupply[]>(() => db.getTruckSupplies());
   const [settings, setSettings] = useState<Settings>(() => db.getSettings());
   const [stats, setStats] = useState<DashboardStats>(() => db.getDashboardStats());
   const [isSyncing, setIsSyncing] = useState(false);
@@ -70,15 +96,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const refreshCustomers = useCallback(() => setCustomers(db.getCustomers()), []);
   const refreshDeliveries = useCallback(() => setDeliveries(db.getDeliveries()), []);
   const refreshPayments = useCallback(() => setPayments(db.getPayments()), []);
+  const refreshDeliveryBoys = useCallback(() => setDeliveryBoys(db.getDeliveryBoys()), []);
+  const refreshTruckSupplies = useCallback(() => setTruckSupplies(db.getTruckSupplies()), []);
   const refreshStats = useCallback(() => setStats(db.getDashboardStats()), []);
 
   const refreshAll = useCallback(() => {
     refreshCustomers();
     refreshDeliveries();
     refreshPayments();
+    refreshDeliveryBoys();
+    refreshTruckSupplies();
     refreshStats();
     setSettings(db.getSettings());
-  }, [refreshCustomers, refreshDeliveries, refreshPayments, refreshStats]);
+  }, [refreshCustomers, refreshDeliveries, refreshPayments, refreshDeliveryBoys, refreshTruckSupplies, refreshStats]);
 
   const syncFromCloud = useCallback(async (showToast = true) => {
     const currentAuth = getAuth();
@@ -120,9 +150,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const handleAuthOrStorage = () => {
       const currentAuth = getAuth();
-      const bizId = currentAuth.businessId;
-      if (bizId) {
-        db.setCurrentBusiness(bizId);
+      if (currentAuth.businessId) {
+        db.setCurrentBusiness(currentAuth.businessId);
         refreshAll();
         if (isSupabaseConfigured()) {
           syncFromCloud(false).catch(() => {});
@@ -202,6 +231,61 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return result;
   }, [refreshAll]);
 
+  const recordSkippedDeliveryAction = useCallback((params: {
+    customerId: string;
+    customerName: string;
+    date: string;
+    time: string;
+    skipReason: string;
+    deliveryBoyId?: string;
+    deliveryBoyName?: string;
+    notes?: string;
+  }) => {
+    const result = db.recordSkippedDelivery(params);
+    const currentAuth = getAuth();
+    if (currentAuth.businessId && isSupabaseConfigured()) {
+      upsertDeliveryToSupabase(currentAuth.businessId, result).catch(() => {});
+    }
+    refreshAll();
+    return result;
+  }, [refreshAll]);
+
+  const addDeliveryBoyAction = useCallback((boy: Omit<DeliveryBoy, 'id' | 'createdAt' | 'updatedAt'>) => {
+    const result = db.addDeliveryBoy(boy);
+    refreshAll();
+    return result;
+  }, [refreshAll]);
+
+  const updateDeliveryBoyAction = useCallback((id: string, updates: Partial<DeliveryBoy>) => {
+    const result = db.updateDeliveryBoy(id, updates);
+    refreshAll();
+    return result;
+  }, [refreshAll]);
+
+  const deleteDeliveryBoyAction = useCallback((id: string) => {
+    const result = db.deleteDeliveryBoy(id);
+    refreshAll();
+    return result;
+  }, [refreshAll]);
+
+  const addTruckSupplyAction = useCallback((supply: Omit<TruckSupply, 'id' | 'createdAt' | 'updatedAt'>) => {
+    const result = db.addTruckSupply(supply);
+    refreshAll();
+    return result;
+  }, [refreshAll]);
+
+  const updateTruckSupplyAction = useCallback((id: string, updates: Partial<TruckSupply>) => {
+    const result = db.updateTruckSupply(id, updates);
+    refreshAll();
+    return result;
+  }, [refreshAll]);
+
+  const deleteTruckSupplyAction = useCallback((id: string) => {
+    const result = db.deleteTruckSupply(id);
+    refreshAll();
+    return result;
+  }, [refreshAll]);
+
   const addPayment = useCallback((payment: Omit<Payment, 'id' | 'createdAt' | 'updatedAt'>) => {
     const result = db.addPayment(payment);
     const currentAuth = getAuth();
@@ -245,11 +329,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   return (
     <AppContext.Provider value={{
-      customers, deliveries, payments, settings, stats, isSyncing,
-      refreshAll, refreshCustomers, refreshDeliveries, refreshPayments, refreshStats,
+      customers, deliveries, payments, deliveryBoys, truckSupplies, settings, stats, isSyncing,
+      refreshAll, refreshCustomers, refreshDeliveries, refreshPayments, refreshDeliveryBoys, refreshTruckSupplies, refreshStats,
       syncFromCloud,
       addCustomer, updateCustomer, deleteCustomer: deleteCustomerAction,
       addDelivery, updateDelivery, deleteDelivery: deleteDeliveryAction,
+      recordSkippedDelivery: recordSkippedDeliveryAction,
+      addDeliveryBoy: addDeliveryBoyAction, updateDeliveryBoy: updateDeliveryBoyAction, deleteDeliveryBoy: deleteDeliveryBoyAction,
+      addTruckSupply: addTruckSupplyAction, updateTruckSupply: updateTruckSupplyAction, deleteTruckSupply: deleteTruckSupplyAction,
       addPayment, updatePayment, deletePayment: deletePaymentAction,
       updateSettings: updateSettingsAction,
       getCustomerBalance, getCurrencySymbol,

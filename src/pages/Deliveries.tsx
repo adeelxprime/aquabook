@@ -7,22 +7,37 @@ import { openWhatsAppDeliverySlip, openSmsDeliverySlip, getCustomerBalance } fro
 import toast from 'react-hot-toast';
 
 export default function Deliveries() {
-  const { customers, deliveries, addDelivery, updateDelivery, deleteDelivery, settings } = useApp();
+  const { customers, deliveries, addDelivery, updateDelivery, deleteDelivery, deliveryBoys, settings } = useApp();
 
   const [search, setSearch] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [filterCustomer, setFilterCustomer] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
+  const [filterDeliveryStatus, setFilterDeliveryStatus] = useState<'all' | 'delivered' | 'skipped'>('all');
+  const [filterDeliveryBoy, setFilterDeliveryBoy] = useState('all');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const [form, setForm] = useState({
-    customerId: '', date: format(new Date(), 'yyyy-MM-dd'), time: format(new Date(), 'HH:mm'),
-    quantity: 1, emptyBottlesReceived: 1, waterType: 'Regular', pricePerUnit: settings.defaultWaterPrice,
-    totalPrice: settings.defaultWaterPrice, paymentStatus: 'paid' as 'paid' | 'partial' | 'unpaid',
-    paidAmount: settings.defaultWaterPrice, notes: '',
+    customerId: '', 
+    date: format(new Date(), 'yyyy-MM-dd'), 
+    time: format(new Date(), 'HH:mm'),
+    quantity: 1, 
+    regularQuantity: 1,
+    extraBottles: 0,
+    emptyBottlesReceived: 1, 
+    waterType: 'Regular', 
+    pricePerUnit: settings.defaultWaterPrice,
+    totalPrice: settings.defaultWaterPrice, 
+    paymentStatus: 'paid' as 'paid' | 'partial' | 'unpaid',
+    paidAmount: settings.defaultWaterPrice, 
+    status: 'delivered' as 'delivered' | 'skipped',
+    skipReason: '',
+    deliveryBoyId: '',
+    deliveryBoyName: '',
+    notes: '',
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -31,6 +46,7 @@ export default function Deliveries() {
   const [bulkSelectedIds, setBulkSelectedIds] = useState<string[]>([]);
   const [bulkSearch, setBulkSearch] = useState('');
   const [bulkAreaFilter, setBulkAreaFilter] = useState('all');
+  const [bulkRiderId, setBulkRiderId] = useState('');
   const [bulkDate, setBulkDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [bulkTime, setBulkTime] = useState(format(new Date(), 'HH:mm'));
   const [bulkQtyMode, setBulkQtyMode] = useState<'default' | 'custom'>('default');
@@ -96,6 +112,7 @@ export default function Deliveries() {
     }
 
     let count = 0;
+    const rider = deliveryBoys.find(b => b.id === bulkRiderId);
     bulkSelectedIds.forEach(id => {
       const c = customers.find(x => x.id === id);
       if (!c) return;
@@ -110,13 +127,18 @@ export default function Deliveries() {
         date: bulkDate,
         time: bulkTime,
         quantity: qty,
+        regularQuantity: qty,
+        extraBottles: 0,
         emptyBottlesReceived: qty,
         waterType: c.waterType || 'Regular',
         pricePerUnit: unitPrice,
         totalPrice,
         paymentStatus: bulkPaymentStatus,
         paidAmount: bulkPaymentStatus === 'paid' ? totalPrice : 0,
-        notes: 'Multi-Customer Delivery',
+        status: 'delivered',
+        deliveryBoyId: rider?.id,
+        deliveryBoyName: rider?.name,
+        notes: rider ? `Delivered by ${rider.name}` : 'Multi-Customer Delivery',
       });
       count++;
     });
@@ -129,17 +151,20 @@ export default function Deliveries() {
   const filtered = useMemo(() => {
     return deliveries.filter(d => {
       const matchSearch = !search || d.customerName.toLowerCase().includes(search.toLowerCase());
-      const matchStatus = filterStatus === 'all' || d.paymentStatus === filterStatus;
+      const matchPaymentStatus = filterStatus === 'all' || d.paymentStatus === filterStatus;
+      const matchDeliveryStatus = filterDeliveryStatus === 'all' || 
+        (filterDeliveryStatus === 'delivered' ? d.status !== 'skipped' : d.status === 'skipped');
+      const matchRider = filterDeliveryBoy === 'all' || d.deliveryBoyId === filterDeliveryBoy;
       const matchCustomer = !filterCustomer || d.customerId === filterCustomer;
       const matchStart = !startDate || d.date >= startDate;
       const matchEnd = !endDate || d.date <= endDate;
-      return matchSearch && matchStatus && matchCustomer && matchStart && matchEnd;
+      return matchSearch && matchPaymentStatus && matchDeliveryStatus && matchRider && matchCustomer && matchStart && matchEnd;
     }).sort((a, b) => {
       const da = new Date(`${a.date}T${a.time || '00:00'}`);
       const db = new Date(`${b.date}T${b.time || '00:00'}`);
       return db.getTime() - da.getTime();
     });
-  }, [deliveries, search, filterStatus, filterCustomer, startDate, endDate]);
+  }, [deliveries, search, filterStatus, filterDeliveryStatus, filterDeliveryBoy, filterCustomer, startDate, endDate]);
 
   const customerOptions = customers.map(c => ({ value: c.id, label: c.name, sublabel: `${c.phone}${c.area ? ` • ${c.area}` : ''}` }));
   const fmt = (v: number) => `${settings.currencySymbol}${v.toLocaleString()}`;
@@ -148,11 +173,14 @@ export default function Deliveries() {
     const c = customers.find(x => x.id === customerId);
     if (c) {
       const qty = c.quantity || 1;
+      const extra = form.extraBottles || 0;
+      const totalQty = qty + extra;
       const price = c.pricePerUnit || settings.defaultWaterPrice;
-      const total = qty * price;
+      const total = totalQty * price;
       setForm(prev => ({
-        ...prev, customerId, quantity: qty, emptyBottlesReceived: qty, waterType: c.waterType || 'Regular',
+        ...prev, customerId, regularQuantity: qty, quantity: totalQty, emptyBottlesReceived: totalQty, waterType: c.waterType || 'Regular',
         pricePerUnit: price, totalPrice: total,
+        deliveryBoyId: c.assignedDeliveryBoyId || prev.deliveryBoyId,
         paidAmount: prev.paymentStatus === 'paid' ? total : prev.paymentStatus === 'unpaid' ? 0 : prev.paidAmount,
       }));
     } else {
@@ -160,15 +188,18 @@ export default function Deliveries() {
     }
   };
 
-  const handleQtyPriceChange = (field: 'quantity' | 'pricePerUnit', val: number) => {
+  const handleQtyPriceChange = (field: 'regularQuantity' | 'extraBottles' | 'pricePerUnit', val: number) => {
     setForm(prev => {
-      const q = field === 'quantity' ? val : prev.quantity;
+      const reg = field === 'regularQuantity' ? val : prev.regularQuantity;
+      const ext = field === 'extraBottles' ? val : prev.extraBottles;
+      const totalQ = Math.max(1, reg + ext);
       const p = field === 'pricePerUnit' ? val : prev.pricePerUnit;
-      const total = q * p;
+      const total = totalQ * p;
       return { 
         ...prev, 
         [field]: val, 
-        emptyBottlesReceived: field === 'quantity' ? val : prev.emptyBottlesReceived,
+        quantity: totalQ,
+        emptyBottlesReceived: totalQ,
         totalPrice: total, 
         paidAmount: prev.paymentStatus === 'paid' ? total : prev.paidAmount 
       };
@@ -187,10 +218,47 @@ export default function Deliveries() {
       const d = deliveries.find(x => x.id === id);
       if (!d) return;
       setEditingId(id);
-      setForm({ customerId: d.customerId, date: d.date, time: d.time, quantity: d.quantity, emptyBottlesReceived: d.emptyBottlesReceived || d.quantity, waterType: d.waterType, pricePerUnit: d.pricePerUnit, totalPrice: d.totalPrice, paymentStatus: d.paymentStatus, paidAmount: d.paidAmount, notes: d.notes });
+      const reg = d.regularQuantity || (d.extraBottles ? d.quantity - d.extraBottles : d.quantity);
+      setForm({ 
+        customerId: d.customerId, 
+        date: d.date, 
+        time: d.time, 
+        quantity: d.quantity, 
+        regularQuantity: reg,
+        extraBottles: d.extraBottles || 0,
+        emptyBottlesReceived: d.emptyBottlesReceived !== undefined ? d.emptyBottlesReceived : d.quantity, 
+        waterType: d.waterType, 
+        pricePerUnit: d.pricePerUnit, 
+        totalPrice: d.totalPrice, 
+        paymentStatus: d.paymentStatus, 
+        paidAmount: d.paidAmount, 
+        status: d.status || 'delivered',
+        skipReason: d.skipReason || '',
+        deliveryBoyId: d.deliveryBoyId || '',
+        deliveryBoyName: d.deliveryBoyName || '',
+        notes: d.notes 
+      });
     } else {
       setEditingId(null);
-      setForm({ customerId: '', date: format(new Date(), 'yyyy-MM-dd'), time: format(new Date(), 'HH:mm'), quantity: 1, emptyBottlesReceived: 1, waterType: 'Regular', pricePerUnit: settings.defaultWaterPrice, totalPrice: settings.defaultWaterPrice, paymentStatus: 'paid', paidAmount: settings.defaultWaterPrice, notes: '' });
+      setForm({ 
+        customerId: '', 
+        date: format(new Date(), 'yyyy-MM-dd'), 
+        time: format(new Date(), 'HH:mm'), 
+        quantity: 1, 
+        regularQuantity: 1,
+        extraBottles: 0,
+        emptyBottlesReceived: 1, 
+        waterType: 'Regular', 
+        pricePerUnit: settings.defaultWaterPrice, 
+        totalPrice: settings.defaultWaterPrice, 
+        paymentStatus: 'paid', 
+        paidAmount: settings.defaultWaterPrice, 
+        status: 'delivered',
+        skipReason: '',
+        deliveryBoyId: '',
+        deliveryBoyName: '',
+        notes: '' 
+      });
     }
     setErrors({});
     setIsModalOpen(true);
@@ -200,7 +268,7 @@ export default function Deliveries() {
     const e: Record<string, string> = {};
     if (!form.customerId) e.customerId = 'Select a customer';
     if (!form.date) e.date = 'Date is required';
-    if (form.quantity <= 0) e.quantity = 'Must be > 0';
+    if (form.status !== 'skipped' && form.quantity <= 0) e.quantity = 'Must be > 0';
     if (form.totalPrice < 0) e.totalPrice = 'Cannot be negative';
     if (form.paymentStatus === 'partial' && (form.paidAmount <= 0 || form.paidAmount >= form.totalPrice)) {
       e.paidAmount = 'Must be between 0 and total price';
@@ -213,14 +281,28 @@ export default function Deliveries() {
     e.preventDefault();
     if (!validate()) return;
     const customer = customers.find(c => c.id === form.customerId);
-    const data = { ...form, customerName: customer?.name || 'Unknown' };
+    const rider = deliveryBoys.find(b => b.id === form.deliveryBoyId);
+
+    const isSkipped = form.status === 'skipped';
+    const totalQ = isSkipped ? 0 : form.regularQuantity + form.extraBottles;
+    const totalP = isSkipped ? 0 : totalQ * form.pricePerUnit;
+
+    const data = { 
+      ...form, 
+      customerName: customer?.name || 'Unknown',
+      quantity: totalQ,
+      totalPrice: totalP,
+      paidAmount: isSkipped ? 0 : form.paidAmount,
+      deliveryBoyId: rider?.id || form.deliveryBoyId,
+      deliveryBoyName: rider?.name || form.deliveryBoyName,
+    };
     
     if (editingId) {
       updateDelivery(editingId, data);
       toast.success('Delivery updated!');
     } else {
       const newDel = addDelivery(data);
-      toast.success('Delivery recorded!');
+      toast.success(isSkipped ? 'Pani Nahi Gya (Cross ❌) recorded!' : 'Delivery recorded! (✅)');
 
       // Offer quick WhatsApp slip if customer phone exists
       if (customer && customer.phone) {
@@ -280,16 +362,29 @@ export default function Deliveries() {
 
       {/* Filters */}
       <Card className="p-4">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-3">
           <div className="lg:col-span-2">
             <SearchInput value={search} onChange={setSearch} placeholder="Search by customer name..." />
           </div>
-          <select value={filterCustomer} onChange={(e) => setFilterCustomer(e.target.value)} className="px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/20">
-            <option value="">All Customers</option>
-            {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          <select 
+            value={filterDeliveryStatus} 
+            onChange={(e) => setFilterDeliveryStatus(e.target.value as any)} 
+            className="px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-semibold text-gray-800 focus:outline-none focus:ring-2 focus:ring-sky-500/20"
+          >
+            <option value="all">All Delivery Results</option>
+            <option value="delivered">✅ Delivered (Pani Gya)</option>
+            <option value="skipped">❌ Skipped (Pani Nahi Gya)</option>
+          </select>
+          <select 
+            value={filterDeliveryBoy} 
+            onChange={(e) => setFilterDeliveryBoy(e.target.value)} 
+            className="px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/20"
+          >
+            <option value="all">All Riders</option>
+            {deliveryBoys.map(b => <option key={b.id} value={b.id}>🛵 {b.name}</option>)}
           </select>
           <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/20">
-            <option value="all">All Status</option>
+            <option value="all">All Payment Status</option>
             <option value="paid">Paid</option>
             <option value="partial">Partial</option>
             <option value="unpaid">Unpaid</option>
@@ -315,57 +410,100 @@ export default function Deliveries() {
                     <tr className="border-b border-gray-100 bg-gray-50/50">
                       <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase">Date & Time</th>
                       <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase">Customer</th>
+                      <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase">Delivery Result</th>
                       <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase">Bottles & Cans</th>
+                      <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase">Rider / Staff</th>
                       <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase">Amount</th>
-                      <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase">Status</th>
-                      <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase">Notes</th>
+                      <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase">Payment</th>
                       <th className="text-right px-5 py-3 text-xs font-semibold text-gray-500 uppercase">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
-                    {filtered.map(d => (
-                      <tr key={d.id} className="hover:bg-gray-50/50 transition-colors">
-                        <td className="px-5 py-3.5">
-                          <div className="text-sm font-medium">{format(new Date(d.date), 'MMM d, yyyy')}</div>
-                          <div className="text-xs text-gray-400">{d.time}</div>
-                        </td>
-                        <td className="px-5 py-3.5 text-sm font-medium text-gray-900">{d.customerName}</td>
-                        <td className="px-5 py-3.5 text-sm">
-                          <div className="font-semibold text-sky-700">{d.quantity} bottles ({d.waterType})</div>
-                          <div className="text-xs text-gray-400">
-                            Empty returned: {d.emptyBottlesReceived || 0} cans
-                          </div>
-                        </td>
-                        <td className="px-5 py-3.5 text-sm font-semibold">{fmt(d.totalPrice)}</td>
-                        <td className="px-5 py-3.5">
-                          <StatusBadge status={d.paymentStatus} />
-                          {d.paymentStatus === 'partial' && <div className="text-xs text-gray-400 mt-0.5">Paid: {fmt(d.paidAmount)}</div>}
-                        </td>
-                        <td className="px-5 py-3.5 text-sm text-gray-500 max-w-[150px] truncate">{d.notes || '—'}</td>
-                        <td className="px-5 py-3.5">
-                          <div className="flex items-center justify-end gap-1">
-                            {/* WhatsApp Delivery Slip */}
-                            <button
-                              onClick={() => handleSendSlip(d)}
-                              className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
-                              title="Send WhatsApp Delivery Slip"
-                            >
-                              <MessageSquare className="w-4 h-4" />
-                            </button>
-                            {/* SMS Delivery Slip */}
-                            <button
-                              onClick={() => handleSendSmsSlip(d)}
-                              className="p-2 text-sky-600 hover:bg-sky-50 rounded-lg transition-colors"
-                              title="Send SMS Delivery Slip"
-                            >
-                              <Phone className="w-4 h-4" />
-                            </button>
-                            <button onClick={() => openModal(d.id)} className="p-2 hover:bg-gray-100 rounded-lg transition-colors"><Edit className="w-4 h-4 text-gray-500" /></button>
-                            <button onClick={() => setDeleteId(d.id)} className="p-2 hover:bg-red-50 rounded-lg transition-colors"><Trash2 className="w-4 h-4 text-red-400" /></button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                    {filtered.map(d => {
+                      const isSkipped = d.status === 'skipped';
+                      return (
+                        <tr key={d.id} className={`hover:bg-gray-50/50 transition-colors ${isSkipped ? 'bg-rose-50/20' : ''}`}>
+                          <td className="px-5 py-3.5">
+                            <div className="text-sm font-medium">{format(new Date(d.date), 'MMM d, yyyy')}</div>
+                            <div className="text-xs text-gray-400">{d.time}</div>
+                          </td>
+                          <td className="px-5 py-3.5 text-sm font-medium text-gray-900">{d.customerName}</td>
+                          <td className="px-5 py-3.5">
+                            {isSkipped ? (
+                              <div>
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800">
+                                  <X className="w-3 h-3 stroke-[3]" />
+                                  <span>Pani Nahi Gya</span>
+                                </span>
+                                {d.skipReason && (
+                                  <div className="text-[11px] text-rose-600 font-semibold mt-0.5 max-w-[150px] truncate" title={d.skipReason}>
+                                    {d.skipReason}
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800">
+                                <Check className="w-3 h-3 stroke-[3]" />
+                                <span>Delivered</span>
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-5 py-3.5 text-sm">
+                            {isSkipped ? (
+                              <span className="text-xs text-gray-400 italic">0 Bottles (Skipped)</span>
+                            ) : (
+                              <>
+                                <div className="font-semibold text-sky-700 flex items-center gap-1">
+                                  <span>{d.quantity} bottles</span>
+                                  {d.extraBottles && d.extraBottles > 0 ? (
+                                    <span className="px-1.5 py-0.2 bg-amber-100 text-amber-800 rounded text-[10px] font-bold">
+                                      +{d.extraBottles} Extra 🍾
+                                    </span>
+                                  ) : null}
+                                </div>
+                                <div className="text-xs text-gray-500">
+                                  {d.emptyReturned === false ? (
+                                    <span className="text-rose-600 font-bold">❌ Khali can nahi mila</span>
+                                  ) : (
+                                    <span>Empty returned: {d.emptyBottlesReceived || 0} cans</span>
+                                  )}
+                                </div>
+                              </>
+                            )}
+                          </td>
+                          <td className="px-5 py-3.5 text-xs text-gray-700 font-semibold">
+                            {d.deliveryBoyName ? `🛵 ${d.deliveryBoyName}` : '—'}
+                          </td>
+                          <td className="px-5 py-3.5 text-sm font-semibold">{fmt(d.totalPrice)}</td>
+                          <td className="px-5 py-3.5">
+                            <StatusBadge status={d.paymentStatus} />
+                            {d.paymentStatus === 'partial' && <div className="text-xs text-gray-400 mt-0.5">Paid: {fmt(d.paidAmount)}</div>}
+                          </td>
+                          <td className="px-5 py-3.5">
+                            <div className="flex items-center justify-end gap-1">
+                              {/* WhatsApp Delivery Slip */}
+                              <button
+                                onClick={() => handleSendSlip(d)}
+                                className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+                                title="Send WhatsApp Delivery Slip"
+                              >
+                                <MessageSquare className="w-4 h-4" />
+                              </button>
+                              {/* SMS Delivery Slip */}
+                              <button
+                                onClick={() => handleSendSmsSlip(d)}
+                                className="p-2 text-sky-600 hover:bg-sky-50 rounded-lg transition-colors"
+                                title="Send SMS Delivery Slip"
+                              >
+                                <Phone className="w-4 h-4" />
+                              </button>
+                              <button onClick={() => openModal(d.id)} className="p-2 hover:bg-gray-100 rounded-lg transition-colors"><Edit className="w-4 h-4 text-gray-500" /></button>
+                              <button onClick={() => setDeleteId(d.id)} className="p-2 hover:bg-red-50 rounded-lg transition-colors"><Trash2 className="w-4 h-4 text-red-400" /></button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -374,50 +512,80 @@ export default function Deliveries() {
 
           {/* Mobile Cards */}
           <div className="grid grid-cols-1 gap-3 md:hidden">
-            {filtered.map(d => (
-              <Card key={d.id} className="p-4">
-                <div className="flex items-start justify-between mb-2">
-                  <div>
-                    <p className="font-semibold text-gray-900">{d.customerName}</p>
-                    <p className="text-xs text-gray-500 flex items-center gap-1"><Calendar className="w-3 h-3" />{format(new Date(d.date), 'MMM d, yyyy')} at {d.time}</p>
+            {filtered.map(d => {
+              const isSkipped = d.status === 'skipped';
+              return (
+                <Card key={d.id} className={`p-4 border ${isSkipped ? 'border-rose-200 bg-rose-50/20' : 'border-gray-200'}`}>
+                  <div className="flex items-start justify-between mb-2">
+                    <div>
+                      <p className="font-semibold text-gray-900">{d.customerName}</p>
+                      <p className="text-xs text-gray-500 flex items-center gap-1">
+                        <Calendar className="w-3 h-3" />{format(new Date(d.date), 'MMM d, yyyy')} at {d.time}
+                      </p>
+                    </div>
+                    {isSkipped ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800">
+                        <X className="w-3 h-3 stroke-[3]" />
+                        <span>Pani Nahi Gya</span>
+                      </span>
+                    ) : (
+                      <StatusBadge status={d.paymentStatus} />
+                    )}
                   </div>
-                  <StatusBadge status={d.paymentStatus} />
-                </div>
-                <div className="flex items-center justify-between bg-gray-50 rounded-lg p-3 mb-2 text-sm">
-                  <div>
-                    <span className="text-gray-900 font-bold">{d.quantity} bottles</span>
-                    {d.emptyBottlesReceived ? (
-                      <span className="text-xs text-gray-500 block">({d.emptyBottlesReceived} empty returned)</span>
-                    ) : null}
-                  </div>
-                  <span className="font-semibold text-sky-600">{fmt(d.totalPrice)}</span>
-                </div>
-                {d.paymentStatus === 'partial' && <p className="text-xs text-gray-400 mb-2">Paid: {fmt(d.paidAmount)}</p>}
-                {d.notes && <p className="text-xs text-gray-400 mb-2">{d.notes}</p>}
-                
-                <div className="grid grid-cols-2 gap-2 mb-2">
-                  <button
-                    onClick={() => handleSendSlip(d)}
-                    className="py-1.5 px-2 bg-emerald-500 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5"
-                  >
-                    <MessageSquare className="w-3.5 h-3.5" />
-                    <span>WhatsApp</span>
-                  </button>
-                  <button
-                    onClick={() => handleSendSmsSlip(d)}
-                    className="py-1.5 px-2 bg-sky-600 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5"
-                  >
-                    <Phone className="w-3.5 h-3.5" />
-                    <span>SMS</span>
-                  </button>
-                </div>
 
-                <div className="flex gap-2">
-                  <Button size="sm" variant="secondary" className="flex-1" onClick={() => openModal(d.id)} icon={<Edit className="w-3.5 h-3.5" />}>Edit</Button>
-                  <Button size="sm" variant="danger" className="flex-1" onClick={() => setDeleteId(d.id)} icon={<Trash2 className="w-3.5 h-3.5" />}>Delete</Button>
-                </div>
-              </Card>
-            ))}
+                  {isSkipped ? (
+                    <div className="p-2.5 bg-rose-50 rounded-lg text-xs text-rose-900 mb-2">
+                      <strong>Wajah:</strong> {d.skipReason || 'Delivery Skipped'}
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between bg-gray-50 rounded-lg p-3 mb-2 text-sm">
+                      <div>
+                        <span className="text-gray-900 font-bold">{d.quantity} bottles</span>
+                        {d.extraBottles && d.extraBottles > 0 ? (
+                          <span className="text-xs text-amber-700 font-bold block">
+                            (+{d.extraBottles} Extra Bottles 🍾)
+                          </span>
+                        ) : null}
+                        {d.emptyReturned === false ? (
+                          <span className="text-xs text-rose-600 font-bold block">❌ Khali can nahi mila</span>
+                        ) : d.emptyBottlesReceived ? (
+                          <span className="text-xs text-gray-500 block">({d.emptyBottlesReceived} empty returned)</span>
+                        ) : null}
+                      </div>
+                      <span className="font-semibold text-sky-600">{fmt(d.totalPrice)}</span>
+                    </div>
+                  )}
+
+                  {d.deliveryBoyName && (
+                    <p className="text-xs text-gray-500 mb-2">Rider: <strong className="text-gray-800">{d.deliveryBoyName}</strong></p>
+                  )}
+                  {d.paymentStatus === 'partial' && <p className="text-xs text-gray-400 mb-2">Paid: {fmt(d.paidAmount)}</p>}
+                  {d.notes && <p className="text-xs text-gray-400 mb-2">{d.notes}</p>}
+                  
+                  <div className="grid grid-cols-2 gap-2 mb-2">
+                    <button
+                      onClick={() => handleSendSlip(d)}
+                      className="py-1.5 px-2 bg-emerald-500 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5"
+                    >
+                      <MessageSquare className="w-3.5 h-3.5" />
+                      <span>WhatsApp</span>
+                    </button>
+                    <button
+                      onClick={() => handleSendSmsSlip(d)}
+                      className="py-1.5 px-2 bg-sky-600 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5"
+                    >
+                      <Phone className="w-3.5 h-3.5" />
+                      <span>SMS</span>
+                    </button>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="secondary" className="flex-1" onClick={() => openModal(d.id)} icon={<Edit className="w-3.5 h-3.5" />}>Edit</Button>
+                    <Button size="sm" variant="danger" className="flex-1" onClick={() => setDeleteId(d.id)} icon={<Trash2 className="w-3.5 h-3.5" />}>Delete</Button>
+                  </div>
+                </Card>
+              );
+            })}
           </div>
         </>
       )}
@@ -426,25 +594,182 @@ export default function Deliveries() {
       <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={editingId ? 'Edit Delivery' : 'Record Delivery'} size="lg">
         <form onSubmit={handleSubmit} className="space-y-4">
           <SearchableSelect label="Customer" options={customerOptions} value={form.customerId} onChange={handleCustomerChange} placeholder="Search and select customer..." required error={errors.customerId} />
+          
+          {/* Delivery Boy Selection & Status Toggle */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1.5">
+                Delivery Boy / Rider
+              </label>
+              <select
+                value={form.deliveryBoyId}
+                onChange={e => {
+                  const boy = deliveryBoys.find(b => b.id === e.target.value);
+                  setForm(prev => ({ ...prev, deliveryBoyId: e.target.value, deliveryBoyName: boy?.name || '' }));
+                }}
+                className="w-full px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm font-semibold text-gray-800 focus:outline-none"
+              >
+                <option value="">-- Self / Business Owner --</option>
+                {deliveryBoys.map(boy => (
+                  <option key={boy.id} value={boy.id}>
+                    🛵 {boy.name} ({boy.phone})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1.5">
+                Delivery Result
+              </label>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setForm(prev => ({ ...prev, status: 'delivered', skipReason: '' }))}
+                  className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                    form.status === 'delivered'
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  <Check className="w-3.5 h-3.5 stroke-[3]" />
+                  <span>Delivered (Tick ✅)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setForm(prev => ({ ...prev, status: 'skipped', skipReason: 'Ghar Band Tha (Door Locked)' }))}
+                  className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                    form.status === 'skipped'
+                      ? 'bg-rose-600 text-white shadow-xs'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  <X className="w-3.5 h-3.5 stroke-[3]" />
+                  <span>Pani Nahi Gya (❌)</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* If Skipped: Reason input */}
+          {form.status === 'skipped' ? (
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl space-y-2">
+              <label className="block text-xs font-bold text-rose-900 uppercase">
+                Wajah (Why was water not delivered?)
+              </label>
+              <select
+                value={form.skipReason}
+                onChange={e => setForm(prev => ({ ...prev, skipReason: e.target.value }))}
+                className="w-full px-3 py-2 bg-white border border-rose-300 rounded-xl text-xs font-bold text-rose-950"
+              >
+                <option value="Ghar Band Tha (Door Locked)">🚪 Ghar Band Tha (Door Locked)</option>
+                <option value="Customer Ny Mana Kiya (Refused)">🚫 Customer Ny Mana Kiya (Refused)</option>
+                <option value="Pani Pehle Se Maujood Tha (Full)">💧 Pani Pehle Se Maujood Tha (Full)</option>
+                <option value="Phone Nahi Uthaya (No Answer)">📴 Phone Nahi Uthaya (No Answer)</option>
+                <option value="Khali Can Dastiyab Nahi Thi (No Empty Can)">📦 Khali Can Dastiyab Nahi Thi (No Empty Can)</option>
+                <option value="Other / Custom Reason">✍️ Other / Custom Reason</option>
+              </select>
+              <input
+                type="text"
+                placeholder="Additional notes for skip..."
+                value={form.skipReason.startsWith('Other') ? form.notes : ''}
+                onChange={e => setForm(prev => ({ ...prev, skipReason: e.target.value }))}
+                className="w-full px-3 py-2 bg-white border border-rose-200 rounded-xl text-xs"
+              />
+            </div>
+          ) : (
+            <>
+              {/* Regular & Extra Bottles Inputs */}
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 p-3 bg-sky-50/50 border border-sky-100 rounded-2xl">
+                <div>
+                  <FormInput 
+                    label="Regular Quota" 
+                    type="number" 
+                    value={form.regularQuantity} 
+                    onChange={(v) => handleQtyPriceChange('regularQuantity', Number(v))} 
+                    required 
+                    min={1} 
+                  />
+                </div>
+                <div>
+                  <FormInput 
+                    label="Extra Bottles (+)" 
+                    type="number" 
+                    value={form.extraBottles} 
+                    onChange={(v) => handleQtyPriceChange('extraBottles', Math.max(0, Number(v)))} 
+                    min={0} 
+                  />
+                </div>
+                <div>
+                  <FormInput 
+                    label="Total Bottles" 
+                    type="number" 
+                    value={form.regularQuantity + form.extraBottles} 
+                    disabled
+                  />
+                </div>
+                <div>
+                  <FormInput 
+                    label="Khali Can Returned" 
+                    type="number" 
+                    value={form.emptyBottlesReceived} 
+                    onChange={(v) => setForm({ ...form, emptyBottlesReceived: Number(v) })} 
+                    min={0} 
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <FormInput 
+                  label={`Price Per Unit (${settings.currencySymbol})`} 
+                  type="number" 
+                  value={form.pricePerUnit} 
+                  onChange={(v) => handleQtyPriceChange('pricePerUnit', Number(v))} 
+                  min={0} 
+                  step="0.01" 
+                />
+                <FormInput 
+                  label={`Total Price (${settings.currencySymbol})`} 
+                  type="number" 
+                  value={form.totalPrice} 
+                  onChange={(v) => { 
+                    const t = Number(v); 
+                    setForm(prev => ({ ...prev, totalPrice: t, paidAmount: prev.paymentStatus === 'paid' ? t : prev.paidAmount })); 
+                  }} 
+                  min={0} 
+                  step="0.01" 
+                  error={errors.totalPrice} 
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <FormSelect 
+                  label="Payment Status" 
+                  value={form.paymentStatus} 
+                  onChange={handleStatusChange} 
+                  options={[{ value: 'paid', label: 'Paid' }, { value: 'partial', label: 'Partially Paid' }, { value: 'unpaid', label: 'Unpaid' }]} 
+                />
+                {form.paymentStatus === 'partial' && (
+                  <FormInput 
+                    label={`Paid Amount (${settings.currencySymbol})`} 
+                    type="number" 
+                    value={form.paidAmount} 
+                    onChange={(v) => setForm({ ...form, paidAmount: Number(v) })} 
+                    min={0} 
+                    step="0.01" 
+                    required 
+                    error={errors.paidAmount} 
+                  />
+                )}
+              </div>
+            </>
+          )}
+
           <div className="grid grid-cols-2 gap-4">
             <FormInput label="Date" type="date" value={form.date} onChange={(v) => setForm({ ...form, date: v })} required error={errors.date} />
             <FormInput label="Time" type="time" value={form.time} onChange={(v) => setForm({ ...form, time: v })} required />
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <FormInput label="Water Type" value={form.waterType} onChange={(v) => setForm({ ...form, waterType: v })} />
-            <FormInput label="Filled Bottles (Qty)" type="number" value={form.quantity} onChange={(v) => handleQtyPriceChange('quantity', Number(v))} required min={1} error={errors.quantity} />
-            <FormInput label="Empty Cans Returned" type="number" value={form.emptyBottlesReceived} onChange={(v) => setForm({ ...form, emptyBottlesReceived: Number(v) })} min={0} />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <FormInput label={`Price Per Unit (${settings.currencySymbol})`} type="number" value={form.pricePerUnit} onChange={(v) => handleQtyPriceChange('pricePerUnit', Number(v))} min={0} step="0.01" />
-            <FormInput label={`Total Price (${settings.currencySymbol})`} type="number" value={form.totalPrice} onChange={(v) => { const t = Number(v); setForm(prev => ({ ...prev, totalPrice: t, paidAmount: prev.paymentStatus === 'paid' ? t : prev.paidAmount })); }} min={0} step="0.01" error={errors.totalPrice} />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <FormSelect label="Payment Status" value={form.paymentStatus} onChange={handleStatusChange} options={[{ value: 'paid', label: 'Paid' }, { value: 'partial', label: 'Partially Paid' }, { value: 'unpaid', label: 'Unpaid' }]} />
-            {form.paymentStatus === 'partial' && (
-              <FormInput label={`Paid Amount (${settings.currencySymbol})`} type="number" value={form.paidAmount} onChange={(v) => setForm({ ...form, paidAmount: Number(v) })} min={0} step="0.01" required error={errors.paidAmount} />
-            )}
-          </div>
+
           <FormTextarea label="Notes (Optional)" value={form.notes} onChange={(v) => setForm({ ...form, notes: v })} placeholder="Any notes..." />
           <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
             <Button variant="secondary" onClick={() => setIsModalOpen(false)}>Cancel</Button>
@@ -461,8 +786,8 @@ export default function Deliveries() {
         size="xl"
       >
         <form onSubmit={handleBulkSubmit} className="space-y-4">
-          {/* Date & Time */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 bg-gray-50/80 rounded-xl border border-gray-100">
+          {/* Date, Time & Rider */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3 bg-gray-50/80 rounded-xl border border-gray-100">
             <div>
               <label className="block text-xs font-semibold text-gray-700 mb-1">Delivery Date</label>
               <input
@@ -482,6 +807,21 @@ export default function Deliveries() {
                 required
                 className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-sky-500/20"
               />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-1">Assign Delivery Rider</label>
+              <select
+                value={bulkRiderId}
+                onChange={(e) => setBulkRiderId(e.target.value)}
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-sky-500/20"
+              >
+                <option value="">-- Self / Business Owner --</option>
+                {deliveryBoys.map(boy => (
+                  <option key={boy.id} value={boy.id}>
+                    🛵 {boy.name}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 

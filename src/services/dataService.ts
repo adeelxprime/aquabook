@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import type { Customer, Delivery, Payment, Settings, CustomerMonthlyBill } from '../types';
+import type { Customer, Delivery, Payment, Settings, CustomerMonthlyBill, DeliveryBoy, TruckSupply } from '../types';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -143,6 +143,57 @@ export function deleteDelivery(id: string): boolean {
   return true;
 }
 
+export function recordSkippedDelivery(params: {
+  customerId: string;
+  customerName: string;
+  date: string;
+  time: string;
+  skipReason: string;
+  deliveryBoyId?: string;
+  deliveryBoyName?: string;
+  notes?: string;
+}): Delivery {
+  const existing = getDeliveries().find(d => d.customerId === params.customerId && d.date === params.date);
+  if (existing) {
+    const updated = updateDelivery(existing.id, {
+      status: 'skipped',
+      quantity: 0,
+      extraBottles: 0,
+      regularQuantity: 0,
+      emptyBottlesReceived: 0,
+      totalPrice: 0,
+      paidAmount: 0,
+      paymentStatus: 'unpaid',
+      skipReason: params.skipReason,
+      deliveryBoyId: params.deliveryBoyId,
+      deliveryBoyName: params.deliveryBoyName,
+      notes: params.notes || `Delivery Skipped: ${params.skipReason}`,
+    });
+    return updated!;
+  }
+
+  return addDelivery({
+    customerId: params.customerId,
+    customerName: params.customerName,
+    date: params.date,
+    time: params.time,
+    quantity: 0,
+    regularQuantity: 0,
+    extraBottles: 0,
+    emptyBottlesReceived: 0,
+    waterType: 'Regular Jar',
+    pricePerUnit: 0,
+    totalPrice: 0,
+    paymentStatus: 'unpaid',
+    paidAmount: 0,
+    status: 'skipped',
+    skipReason: params.skipReason,
+    deliveryBoyId: params.deliveryBoyId,
+    deliveryBoyName: params.deliveryBoyName,
+    notes: params.notes || `Delivery Skipped: ${params.skipReason}`,
+  });
+}
+
 // ==================== PAYMENTS ====================
 
 export function getPayments(): Payment[] {
@@ -187,6 +238,87 @@ export function deletePayment(id: string): boolean {
   return true;
 }
 
+// ==================== DELIVERY BOYS (RIDERS / STAFF) ====================
+
+export function getDeliveryBoys(): DeliveryBoy[] {
+  return getFromStorage<DeliveryBoy>(getKey('delivery_boys'), []);
+}
+
+export function getDeliveryBoyById(id: string): DeliveryBoy | undefined {
+  return getDeliveryBoys().find(b => b.id === id);
+}
+
+export function addDeliveryBoy(boy: Omit<DeliveryBoy, 'id' | 'createdAt' | 'updatedAt'>): DeliveryBoy {
+  const list = getDeliveryBoys();
+  const newBoy: DeliveryBoy = {
+    ...boy,
+    id: uuidv4(),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  list.push(newBoy);
+  saveToStorage(getKey('delivery_boys'), list);
+  return newBoy;
+}
+
+export function updateDeliveryBoy(id: string, updates: Partial<DeliveryBoy>): DeliveryBoy | null {
+  const list = getDeliveryBoys();
+  const index = list.findIndex(b => b.id === id);
+  if (index === -1) return null;
+  list[index] = { ...list[index], ...updates, updatedAt: new Date().toISOString() };
+  saveToStorage(getKey('delivery_boys'), list);
+  return list[index];
+}
+
+export function deleteDeliveryBoy(id: string): boolean {
+  const list = getDeliveryBoys();
+  const filtered = list.filter(b => b.id !== id);
+  if (filtered.length === list.length) return false;
+  saveToStorage(getKey('delivery_boys'), filtered);
+  return true;
+}
+
+// ==================== TRUCK & CONTAINER SUPPLY (BULK WATER) ====================
+
+export function getTruckSupplies(): TruckSupply[] {
+  return getFromStorage<TruckSupply>(getKey('truck_supplies'), []);
+}
+
+export function getTruckSupplyById(id: string): TruckSupply | undefined {
+  return getTruckSupplies().find(t => t.id === id);
+}
+
+export function addTruckSupply(supply: Omit<TruckSupply, 'id' | 'createdAt' | 'updatedAt'>): TruckSupply {
+  const list = getTruckSupplies();
+  const newSupply: TruckSupply = {
+    ...supply,
+    id: uuidv4(),
+    tripNumber: supply.tripNumber || `TRIP-${String(list.length + 1).padStart(4, '0')}`,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  list.push(newSupply);
+  saveToStorage(getKey('truck_supplies'), list);
+  return newSupply;
+}
+
+export function updateTruckSupply(id: string, updates: Partial<TruckSupply>): TruckSupply | null {
+  const list = getTruckSupplies();
+  const index = list.findIndex(t => t.id === id);
+  if (index === -1) return null;
+  list[index] = { ...list[index], ...updates, updatedAt: new Date().toISOString() };
+  saveToStorage(getKey('truck_supplies'), list);
+  return list[index];
+}
+
+export function deleteTruckSupply(id: string): boolean {
+  const list = getTruckSupplies();
+  const filtered = list.filter(t => t.id !== id);
+  if (filtered.length === list.length) return false;
+  saveToStorage(getKey('truck_supplies'), filtered);
+  return true;
+}
+
 // ==================== BALANCE CALCULATIONS ====================
 
 export function getCustomerBalance(customerId: string) {
@@ -226,17 +358,30 @@ export function getDashboardStats() {
   const deliveries = getDeliveries();
   const today = new Date().toISOString().split('T')[0];
 
-  const todayDeliveries = deliveries.filter(d => d.date === today);
-  const todayRevenue = todayDeliveries.reduce((sum, d) => sum + d.totalPrice, 0);
-  const todayBottlesDelivered = todayDeliveries.reduce((sum, d) => sum + d.quantity, 0);
-  const pendingPayments = deliveries.filter(d => d.paymentStatus !== 'paid').length;
+  const todayAllDeliveries = deliveries.filter(d => d.date === today);
+  const todayCompleted = todayAllDeliveries.filter(d => d.status !== 'skipped');
+  const todaySkipped = todayAllDeliveries.filter(d => d.status === 'skipped');
+  const todayRevenue = todayCompleted.reduce((sum, d) => sum + d.totalPrice, 0);
+  const todayBottlesDelivered = todayCompleted.reduce((sum, d) => sum + d.quantity, 0);
+  const todayExtraBottles = todayCompleted.reduce((sum, d) => sum + (d.extraBottles || 0), 0);
+
+  const activeCustomers = customers.filter(c => c.status === 'active');
+  const addressedIds = new Set(todayAllDeliveries.map(d => d.customerId));
+  const todayPendingDeliveries = activeCustomers.filter(c => !addressedIds.has(c.id)).length;
+
+  const todayTruckTrips = getTruckSupplies().filter(t => t.date === today).length;
+  const pendingPayments = deliveries.filter(d => d.status !== 'skipped' && d.paymentStatus !== 'paid').length;
   const totalOutstanding = getTotalOutstandingBalance();
 
   return {
-    totalCustomers: customers.filter(c => c.status === 'active').length,
-    todayDeliveries: todayDeliveries.length,
+    totalCustomers: activeCustomers.length,
+    todayDeliveries: todayCompleted.length,
     todayRevenue,
     todayBottlesDelivered,
+    todaySkippedDeliveries: todaySkipped.length,
+    todayPendingDeliveries,
+    todayExtraBottles,
+    todayTruckTrips,
     pendingPayments,
     totalOutstanding,
   };
@@ -488,15 +633,36 @@ export function formatDeliverySlipWhatsApp(
   const monthTotal = monthBottles !== undefined ? monthBottles : getMonthBottlesForCustomer(customer.id, delivery.date.slice(0, 7));
   const timeFormatted = formatTime12(delivery.time);
 
+  if (delivery.status === 'skipped') {
+    return `💧 *${biz.toUpperCase()}* 💧
+❌ *Water Delivery Notice (Pani Nahi Gya)*
+━━━━━━━━━━━━━━━━━━━━
+👤 *Customer:* *${customer.name}*
+📅 *Tareekh:* ${delivery.date} (${timeFormatted})
+⚠️ *Status:* *Delivery Missed / Skipped*
+❓ *Wajah:* ${delivery.skipReason || 'Ghar band ya phone nahi uthaya'}
+${delivery.deliveryBoyName ? `🛵 *Delivery Boy:* ${delivery.deliveryBoyName}\n` : ''}━━━━━━━━━━━━━━━━━━━━
+Agar aapko pani ki zaroorat hai to foran call karein:
+${phone ? `📞 Rabta: ${phone}\n` : ''}🙏 Shukriya!`;
+  }
+
+  const extraInfo = delivery.extraBottles && delivery.extraBottles > 0
+    ? ` (${delivery.regularQuantity || delivery.quantity - delivery.extraBottles} Regular + 🍾 *${delivery.extraBottles} Extra*)`
+    : '';
+
+  const emptyStatusText = (delivery.emptyBottlesReceived && delivery.emptyBottlesReceived > 0)
+    ? `✅ *${delivery.emptyBottlesReceived} Can(s) Wapis Mile*`
+    : `❌ *Khali Can Nahi Mila (Baqi / Pending)*`;
+
   return `💧 *${biz.toUpperCase()}* 💧
 🚚 *Daily Water Delivery Slip*
 ━━━━━━━━━━━━━━━━━━━━
 👤 *Customer:* *${customer.name}*
 📅 *Tareekh:* ${delivery.date} (${timeFormatted})
-📦 *Aj Deliver:* *${delivery.quantity} Bottle(s)* (${delivery.waterType || 'Regular'})
-🔄 *Khali Can Wapis:* *${delivery.emptyBottlesReceived || 0} Can(s)*
+📦 *Aj Deliver:* *${delivery.quantity} Bottle(s)*${extraInfo} (${delivery.waterType || 'Regular'})
+🔄 *Khali Can:* ${emptyStatusText}
 💵 *Aj Ka Bill:* *${sym} ${delivery.totalPrice}* (${delivery.paymentStatus === 'paid' ? '✅ Paid' : '⏳ Udhar'})
-📊 *Month Total Bottles:* *${monthTotal} Bottles*
+${delivery.deliveryBoyName ? `🛵 *Delivered By:* ${delivery.deliveryBoyName}\n` : ''}📊 *Month Total Bottles:* *${monthTotal} Bottles*
 ⚠️ *Kul Baqiya (Due):* *${sym} ${balance.outstandingBalance.toLocaleString()}*
 ━━━━━━━━━━━━━━━━━━━━
 ${phone ? `📞 Rabta: ${phone}\n` : ''}🙏 Shukriya!`;
@@ -514,7 +680,13 @@ export function formatDeliverySlipSms(
   const monthTotal = monthBottles !== undefined ? monthBottles : getMonthBottlesForCustomer(customer.id, delivery.date.slice(0, 7));
   const timeFormatted = formatTime12(delivery.time);
 
-  return `[${biz}] Salam ${customer.name}, Aj ${delivery.date} ko ${timeFormatted} par ${delivery.quantity} bottle deliver hui. Khali can wapis: ${delivery.emptyBottlesReceived || 0}. Is maheene total: ${monthTotal} bottles. Aj ka bill: ${sym} ${delivery.totalPrice}. Kul Baqaya: ${sym} ${balance.outstandingBalance}. Shukriya!`;
+  if (delivery.status === 'skipped') {
+    return `[${biz}] Salam ${customer.name}, Aj ${delivery.date} ko delivery nahi ho saki. Wajah: ${delivery.skipReason || 'Ghar band tha'}. Pani chahiye to rabta karein: ${settings.businessPhone || ''}`;
+  }
+
+  const extraTxt = delivery.extraBottles && delivery.extraBottles > 0 ? ` (+${delivery.extraBottles} Extra)` : '';
+
+  return `[${biz}] Salam ${customer.name}, Aj ${delivery.date} ko ${timeFormatted} par ${delivery.quantity} bottle${extraTxt} deliver hui. Khali can wapis: ${delivery.emptyBottlesReceived || 0}. Is maheene total: ${monthTotal} bottles. Aj ka bill: ${sym} ${delivery.totalPrice}. Kul Baqaya: ${sym} ${balance.outstandingBalance}. Shukriya!`;
 }
 
 export function openWhatsAppDeliverySlip(
@@ -541,6 +713,55 @@ export function openSmsDeliverySlip(
   let cleanPhone = customer.phone.replace(/[^0-9]/g, '');
   const url = `sms:${cleanPhone}?body=${encodeURIComponent(text)}`;
   window.open(url, '_self');
+}
+
+export function formatTruckSupplyWhatsApp(
+  trip: TruckSupply,
+  settings: Settings
+): string {
+  const sym = settings.currencySymbol || 'Rs.';
+  const biz = settings.businessName || 'AquaBook Water';
+  const phone = settings.businessPhone || '';
+  const timeFormatted = formatTime12(trip.time);
+
+  if (trip.status === 'skipped') {
+    return `💧 *${biz.toUpperCase()} - BULK SUPPLY* 💧
+❌ *Trip Cancelled / Not Supplied (Pani Nahi Gya)*
+━━━━━━━━━━━━━━━━━━━━
+🏢 *Client / Site:* *${trip.clientName}*
+🚛 *Vehicle:* ${trip.vehicleNumber} (${trip.vehicleType.toUpperCase()})
+👤 *Driver / Staff:* ${trip.driverName}
+📅 *Tareekh:* ${trip.date} (${timeFormatted})
+⚠️ *Wajah:* ${trip.skipReason || 'Site closed or trip cancelled'}
+━━━━━━━━━━━━━━━━━━━━
+${phone ? `📞 Rabta: ${phone}\n` : ''}🙏 Shukriya!`;
+  }
+
+  const extra = trip.extraQuantity && trip.extraQuantity > 0 ? ` (+${trip.extraQuantity} Extra)` : '';
+  const typeLabel = trip.supplyType === 'tanker_water' ? 'Water Tanker (Liters)' : 'Bulk Water Containers';
+
+  return `💧 *${biz.toUpperCase()} - BULK SUPPLY DISPATCH* 💧
+🚚 *Trip Challan / Delivery Slip*
+━━━━━━━━━━━━━━━━━━━━
+🏢 *Client / Site:* *${trip.clientName}*
+🚛 *Vehicle No:* *${trip.vehicleNumber}*
+👤 *Driver / Staff:* *${trip.driverName}*
+📅 *Tareekh:* ${trip.date} (${timeFormatted})
+📍 *Address:* ${trip.destinationAddress || 'N/A'}
+━━━━━━━━━━━━━━━━━━━━
+📦 *Supply Type:* ${typeLabel}
+💧 *Supplied Qty:* *${trip.quantitySupplied}${extra}*
+💵 *Total Amount:* *${sym} ${trip.totalAmount.toLocaleString()}*
+💳 *Payment Status:* *${trip.paymentStatus.toUpperCase()}* (${sym} ${trip.paidAmount} Paid)
+${trip.notes ? `📝 *Notes:* ${trip.notes}\n` : ''}━━━━━━━━━━━━━━━━━━━━
+${phone ? `📞 Rabta: ${phone}\n` : ''}🙏 Shukriya!`;
+}
+
+export function openWhatsAppTruckSlip(trip: TruckSupply, settings: Settings) {
+  const text = formatTruckSupplyWhatsApp(trip, settings);
+  const cleanPhone = trip.clientPhone ? normalizeWhatsAppPhone(trip.clientPhone) : '';
+  const url = cleanPhone ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(text)}` : `https://wa.me/?text=${encodeURIComponent(text)}`;
+  window.open(url, '_blank');
 }
 
 export function getAllCustomersMonthlyBills(monthStr: string): CustomerMonthlyBill[] {
@@ -586,22 +807,38 @@ export function formatFullCalendarWhatsAppMessage(bill: CustomerMonthlyBill, set
   });
 
   let dailyLines = '';
+  let totalExtra = 0;
+  let totalEmptyReturned = 0;
+
   for (let day = 1; day <= totalDays; day++) {
     const dayDeliveries = deliveriesByDay[day] || [];
-    const dayQty = dayDeliveries.reduce((sum, d) => sum + d.quantity, 0);
+    const delivered = dayDeliveries.filter(d => d.status !== 'skipped');
+    const skipped = dayDeliveries.filter(d => d.status === 'skipped');
+    const dayQty = delivered.reduce((sum, d) => sum + d.quantity, 0);
+    const dayExtra = delivered.reduce((sum, d) => sum + (d.extraBottles || 0), 0);
+    const dayEmpty = delivered.reduce((sum, d) => sum + (d.emptyBottlesReceived || 0), 0);
+    totalExtra += dayExtra;
+    totalEmptyReturned += dayEmpty;
+
     if (dayQty > 0) {
-      dailyLines += `📅 ${String(day).padStart(2, '0')} ${bill.monthName.slice(0, 3)}: *${dayQty} Jar(s)*\n`;
+      const extraText = dayExtra > 0 ? ` (Extra: +${dayExtra} 🍾)` : '';
+      const emptyText = dayEmpty > 0 ? ` [Khali: ${dayEmpty} ✅]` : ` [Khali: 0 ❌]`;
+      dailyLines += `📅 ${String(day).padStart(2, '0')} ${bill.monthName.slice(0, 3)}: *${dayQty} Jar(s)*${extraText}${emptyText}\n`;
+    } else if (skipped.length > 0) {
+      const reason = skipped[0].skipReason || 'Pani Nahi Gya';
+      dailyLines += `📅 ${String(day).padStart(2, '0')} ${bill.monthName.slice(0, 3)}: ❌ *Pani Nahi Gya* (${reason})\n`;
     }
   }
 
   return `💧 *${biz.toUpperCase()}* 💧
-🧾 *Rozana 1 se ${totalDays} Date Ka Hisab*
+🧾 *Rozana 1 se ${totalDays} Date Ka Hisab Statement*
 📅 *Mahina:* ${bill.monthName}
 👤 *Customer:* *${bill.customerName}*
 ━━━━━━━━━━━━━━━━━━━━
-📦 *ROZANA BOTTLE DETAILS:*
-${dailyLines || 'Is mahine koi delivery nahi hui.\n'}━━━━━━━━━━━━━━━━━━━━
-📊 *Total Bottles:* *${bill.totalBottles} Bottles*
+📦 *ROZANA BOTTLE DETAILS (1-to-31):*
+${dailyLines || 'Is mahine koi delivery record nahi hua.\n'}━━━━━━━━━━━━━━━━━━━━
+📊 *Total Bottles:* *${bill.totalBottles} Bottles* ${totalExtra > 0 ? `(Extra: ${totalExtra} 🍾)` : ''}
+🪣 *Khali Cans Wapis:* *${totalEmptyReturned} Cans*
 💵 *Month Bill:* *${sym} ${bill.monthCharges.toLocaleString()}*
 🔴 *Kul Wajib-ul-ada (Due):* *${sym} ${bill.netOutstanding.toLocaleString()} /-*
 ━━━━━━━━━━━━━━━━━━━━
@@ -643,6 +880,12 @@ export function generateMonthlyBillPdf(bill: CustomerMonthlyBill, settings: Sett
   const sym = settings.currencySymbol || 'Rs.';
 
   const monthValue = bill.month || bill.monthStr || new Date().toISOString().slice(0, 7);
+
+  // Calculate days in the month (e.g. 1 to 31)
+  const [yearStr, mStr] = monthValue.split('-');
+  const year = parseInt(yearStr, 10) || new Date().getFullYear();
+  const month = parseInt(mStr, 10) || (new Date().getMonth() + 1);
+  const totalDays = new Date(year, month, 0).getDate(); // 28, 29, 30, or 31
 
   // Header Banner
   doc.setFillColor(14, 165, 233); // Sky blue #0ea5e9
@@ -729,17 +972,13 @@ export function generateMonthlyBillPdf(bill: CustomerMonthlyBill, settings: Sett
     paymentsByDay[day] = (paymentsByDay[day] || 0) + (p.amount || 0);
   });
 
-  // Calculate days in the month (e.g. 1 to 31)
-  const [yearStr, mStr] = monthValue.split('-');
-  const year = parseInt(yearStr, 10) || new Date().getFullYear();
-  const month = parseInt(mStr, 10) || (new Date().getMonth() + 1);
-  const totalDays = new Date(year, month, 0).getDate(); // 28, 29, 30, or 31
-
   const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
   // Build the 1 to 31 Day table rows
   const tableData: (string | number)[][] = [];
   let sumReturned = 0;
+  let sumExtraBottles = 0;
+  let sumRegularBottles = 0;
 
   for (let day = 1; day <= totalDays; day++) {
     const dateObj = new Date(year, month - 1, day);
@@ -747,14 +986,40 @@ export function generateMonthlyBillPdf(bill: CustomerMonthlyBill, settings: Sett
     const dateFormatted = `${String(day).padStart(2, '0')}-${String(month).padStart(2, '0')}-${year}`;
     
     const dayDeliveries = deliveriesByDay[day] || [];
-    const dayQty = dayDeliveries.reduce((sum, d) => sum + (d.quantity || 0), 0);
-    const dayEmpty = dayDeliveries.reduce((sum, d) => sum + (d.emptyBottlesReceived || 0), 0);
-    sumReturned += dayEmpty;
-    const dayTotal = dayDeliveries.reduce((sum, d) => sum + (d.totalPrice || 0), 0);
+    const delivered = dayDeliveries.filter(d => d.status !== 'skipped');
+    const skipped = dayDeliveries.filter(d => d.status === 'skipped');
+
+    const dayQty = delivered.reduce((sum, d) => sum + (d.quantity || 0), 0);
+    const dayExtra = delivered.reduce((sum, d) => sum + (d.extraBottles || 0), 0);
+    const dayRegular = delivered.reduce((sum, d) => sum + (d.regularQuantity || (d.quantity - (d.extraBottles || 0))), 0);
+    const dayEmpty = delivered.reduce((sum, d) => sum + (d.emptyBottlesReceived || 0), 0);
+    const dayTotal = delivered.reduce((sum, d) => sum + (d.totalPrice || 0), 0);
     const dayPaid = paymentsByDay[day] || 0;
 
-    const bottlesStr = dayQty > 0 ? `${dayQty} Jar(s)` : '-';
-    const emptyStr = dayEmpty > 0 ? `${dayEmpty} Can(s)` : '-';
+    sumReturned += dayEmpty;
+    sumExtraBottles += dayExtra;
+    sumRegularBottles += dayRegular;
+
+    let bottlesStr = '-';
+    let emptyStr = '-';
+
+    if (dayQty > 0) {
+      if (dayExtra > 0) {
+        bottlesStr = `${dayQty} Jar (${dayRegular} Reg + ${dayExtra} Extra)`;
+      } else {
+        bottlesStr = `${dayQty} Jar(s)`;
+      }
+
+      if (dayEmpty > 0) {
+        emptyStr = `${dayEmpty} Can Wapis [OK]`;
+      } else {
+        emptyStr = 'Nahi Mila [Pending]';
+      }
+    } else if (skipped.length > 0) {
+      bottlesStr = `Pani Nahi Gya (${skipped[0].skipReason || 'Skipped'})`;
+      emptyStr = '-';
+    }
+
     const billStr = dayTotal > 0 ? `${sym} ${dayTotal.toLocaleString()}` : '-';
     const paidStr = dayPaid > 0 ? `${sym} ${dayPaid.toLocaleString()}` : '-';
 
@@ -770,13 +1035,13 @@ export function generateMonthlyBillPdf(bill: CustomerMonthlyBill, settings: Sett
 
   autoTable(doc, {
     startY: 87,
-    head: [['Tareekh (Day)', 'Full Date', 'Bottles Delivered', 'Khali Can Wapis', 'Daily Bill', 'Wasooli (Paid)']],
+    head: [['Tareekh (Day)', 'Full Date', 'Bottles Delivered (Regular + Extra)', 'Khali Can Status', 'Daily Bill', 'Wasooli (Paid)']],
     body: tableData,
     foot: [[
       'TOTAL (1-31)',
       `${totalDays} Days`,
-      `${bill.totalBottles || 0} Bottles`,
-      `${sumReturned} Cans`,
+      `${bill.totalBottles || 0} (${sumRegularBottles} Reg + ${sumExtraBottles} Extra)`,
+      `${sumReturned} Cans Wapis`,
       `${sym} ${(bill.monthCharges || 0).toLocaleString()}`,
       `${sym} ${(bill.totalPaidInMonth || 0).toLocaleString()}`,
     ]],
@@ -797,25 +1062,31 @@ export function generateMonthlyBillPdf(bill: CustomerMonthlyBill, settings: Sett
   const finalY = ((doc as any).lastAutoTable?.finalY || 160) + 6;
   if (finalY < 270) {
     doc.setFillColor(254, 242, 242);
-    doc.roundedRect(120, finalY, 76, 18, 2, 2, 'F');
+    doc.roundedRect(110, finalY, 86, 22, 2, 2, 'F');
 
-    doc.setFontSize(8.5);
+    doc.setFontSize(7.5);
     doc.setTextColor(100, 116, 139);
-    doc.text('Total Month Bottles:', 124, finalY + 5.5);
+    doc.text('Total Month Bottles:', 114, finalY + 5);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(15, 23, 42);
-    doc.text(`${bill.totalBottles || 0}`, 190, finalY + 5.5, { align: 'right' });
+    doc.text(`${bill.totalBottles || 0} (${sumExtraBottles} Extra)`, 192, finalY + 5, { align: 'right' });
+
+    doc.setFont('helvetica', 'normal');
+    doc.text('Khali Cans Wapis Mile:', 114, finalY + 10.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(16, 185, 129);
+    doc.text(`${sumReturned} Cans`, 192, finalY + 10.5, { align: 'right' });
 
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(190, 18, 60);
-    doc.text('Kul Wajib-ul-ada (Net Due):', 124, finalY + 13);
-    doc.setFontSize(10);
-    doc.text(`${sym} ${(bill.netOutstanding || 0).toLocaleString()}`, 190, finalY + 13, { align: 'right' });
+    doc.text('Kul Wajib-ul-ada (Net Due):', 114, finalY + 17);
+    doc.setFontSize(9.5);
+    doc.text(`${sym} ${(bill.netOutstanding || 0).toLocaleString()}`, 192, finalY + 17, { align: 'right' });
 
     doc.setFontSize(7.5);
     doc.setTextColor(148, 163, 184);
     doc.setFont('helvetica', 'italic');
-    doc.text('Rozana 1 se 31 tareekh ka mukammal hisab statement. Shukriya!', 14, 287);
+    doc.text('Rozana 1 se 31 tareekh ka mukammal hisab statement (Extra bottles & khali can details samet). Shukriya!', 14, 287);
   }
 
   const cleanName = (bill.customerName || 'Customer').replace(/[^a-zA-Z0-9]/g, '_');

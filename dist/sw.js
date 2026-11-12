@@ -11,10 +11,10 @@ const STATIC_ASSETS = [
   '/pwa-512.png',
   '/apple-touch-icon.png',
   '/icons.svg',
-  '/assets/html2canvas-nBw05R-p.js',
-  '/assets/index-DZdKv0vL.js',
-  '/assets/index-fUQQFesC.css',
-  '/assets/index.es-BmdOSpp2.js',
+  '/assets/html2canvas-BZFMK7Em.js',
+  '/assets/index-C6WJSPNn.js',
+  '/assets/index-CgyLXy-u.css',
+  '/assets/index.es-DXlIy8Fo.js',
   '/assets/purify.es-Dn3VvdGh.js'
 ];
 

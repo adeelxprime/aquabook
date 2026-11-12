@@ -38,6 +38,7 @@ export default function CustomerDetail() {
   }, [deliveries, todayStr]);
 
   const [todayQty, setTodayQty] = useState(customer?.quantity || 1);
+  const [todayExtraBottles, setTodayExtraBottles] = useState(0);
   const [todayEmpty, setTodayEmpty] = useState(customer?.quantity || 1);
   const [todayPaymentStatus, setTodayPaymentStatus] = useState<'paid' | 'unpaid'>('unpaid');
 
@@ -67,32 +68,55 @@ export default function CustomerDetail() {
   const methodLabel: Record<string, string> = { cash: 'Cash', bank_transfer: 'Bank Transfer', other: 'Other' };
 
   // Daily Delivery Action
-  const handleDeliverToday = (extraQty?: number) => {
-    const qty = extraQty !== undefined ? extraQty : todayQty;
+  const handleDeliverToday = (addedBottles?: number) => {
+    const regular = todayQty;
+    const extra = addedBottles !== undefined ? addedBottles : todayExtraBottles;
+    const totalBottles = regular + extra;
     const unitPrice = customer.pricePerUnit || settings.defaultWaterPrice || 30;
-    const totalPrice = qty * unitPrice;
+    const totalPrice = totalBottles * unitPrice;
     const nowTime = format(new Date(), 'HH:mm');
 
-    const newDelivery = addDelivery({
-      customerId: customer.id,
-      customerName: customer.name,
-      date: todayStr,
-      time: nowTime,
-      quantity: qty,
-      emptyBottlesReceived: todayEmpty,
-      waterType: customer.waterType || 'Regular Jar',
-      pricePerUnit: unitPrice,
-      totalPrice,
-      paymentStatus: todayPaymentStatus,
-      paidAmount: todayPaymentStatus === 'paid' ? totalPrice : 0,
-      notes: `Rozana Bottle Delivery Entry`,
-    });
+    let newDelivery: Delivery;
+    if (todayDelivery) {
+      newDelivery = updateDelivery(todayDelivery.id, {
+        quantity: totalBottles,
+        regularQuantity: regular,
+        extraBottles: extra,
+        emptyBottlesReceived: todayEmpty,
+        waterType: customer.waterType || 'Regular Jar',
+        pricePerUnit: unitPrice,
+        totalPrice,
+        paymentStatus: todayPaymentStatus,
+        paidAmount: todayPaymentStatus === 'paid' ? totalPrice : 0,
+        status: 'delivered',
+        skipReason: undefined,
+        notes: extra > 0 ? `Delivered ${totalBottles} bottles (${extra} extra)` : `Rozana Delivery Entry`,
+      })!;
+    } else {
+      newDelivery = addDelivery({
+        customerId: customer.id,
+        customerName: customer.name,
+        date: todayStr,
+        time: nowTime,
+        quantity: totalBottles,
+        regularQuantity: regular,
+        extraBottles: extra,
+        emptyBottlesReceived: todayEmpty,
+        waterType: customer.waterType || 'Regular Jar',
+        pricePerUnit: unitPrice,
+        totalPrice,
+        paymentStatus: todayPaymentStatus,
+        paidAmount: todayPaymentStatus === 'paid' ? totalPrice : 0,
+        status: 'delivered',
+        notes: extra > 0 ? `Delivered ${totalBottles} bottles (${extra} extra)` : `Rozana Delivery Entry`,
+      });
+    }
 
-    toast.success(`Aj ki delivery (${qty} bottle) save ho gayi!`);
+    toast.success(`Aj ki delivery (${totalBottles} bottle) save ho gayi! (✅)`);
 
     const bal = getCustomerBalance(customer.id);
     // Open WhatsApp slip automatically
-    openWhatsAppDeliverySlip(newDelivery, customer, bal, settings, monthTotalBottles + qty);
+    openWhatsAppDeliverySlip(newDelivery, customer, bal, settings, monthTotalBottles + totalBottles);
   };
 
   const handleSendDeliverySlipWhatsApp = (d: Delivery) => {
@@ -218,136 +242,207 @@ export default function CustomerDetail() {
         </div>
 
         {todayDelivery ? (
-          <div className="mt-4 p-4 rounded-2xl bg-emerald-50/80 border border-emerald-100 space-y-3">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <div className="flex items-center gap-2.5">
-                <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+          todayDelivery.status === 'skipped' ? (
+            <div className="mt-4 p-4 rounded-2xl bg-rose-50 border border-rose-200 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5">
+                  <X className="w-5 h-5 text-rose-600 shrink-0 stroke-[3]" />
+                  <div>
+                    <p className="text-sm font-bold text-rose-950">
+                      ❌ Aj Is Customer Ko Pani Nahi Gya (Delivery Skipped)
+                    </p>
+                    <p className="text-xs text-rose-700 mt-0.5">
+                      Wajah: <strong>{todayDelivery.skipReason || 'Ghar band ya phone nahi uthaya'}</strong>
+                      {todayDelivery.deliveryBoyName ? ` • Marked by: ${todayDelivery.deliveryBoyName}` : ''}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleDeliverToday(0)}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center gap-1.5 self-start sm:self-auto"
+                >
+                  <Check className="w-3.5 h-3.5 stroke-[3]" />
+                  <span>Abhi Deliver Karein (Tick ✅)</span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-4 p-4 rounded-2xl bg-emerald-50/80 border border-emerald-100 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                  <div>
+                    <p className="text-sm font-bold text-emerald-950">
+                      ✅ Aj ki delivery save ho chuki hai ({todayDelivery.quantity} Bottle{todayDelivery.quantity > 1 ? 's' : ''})
+                      {todayDelivery.extraBottles ? ` (+${todayDelivery.extraBottles} Extra 🍾)` : ''}
+                    </p>
+                    <p className="text-xs text-emerald-700">
+                      Delivered at <strong className="font-bold">{todayDelivery.time}</strong>
+                      {todayDelivery.deliveryBoyName ? ` by ${todayDelivery.deliveryBoyName}` : ''} • Amount: <strong>{fmt(todayDelivery.totalPrice)}</strong> ({todayDelivery.paymentStatus.toUpperCase()})
+                      {todayDelivery.emptyBottlesReceived ? ` • Khali cans return: ${todayDelivery.emptyBottlesReceived}` : ''}
+                    </p>
+                  </div>
+                </div>
+                <span className="text-xs font-bold text-emerald-800 bg-emerald-100 px-2.5 py-1 rounded-lg self-start sm:self-auto">
+                  Delivered Today (✅)
+                </span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-emerald-200/50">
+                <button
+                  onClick={() => handleSendDeliverySlipWhatsApp(todayDelivery)}
+                  className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all"
+                >
+                  <MessageSquare className="w-3.5 h-3.5" />
+                  <span>WhatsApp Slip Bhejein</span>
+                </button>
+                <button
+                  onClick={() => handleSendDeliverySlipSms(todayDelivery)}
+                  className="flex items-center gap-1.5 px-3.5 py-2 bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all"
+                >
+                  <Phone className="w-3.5 h-3.5" />
+                  <span>Mobile SMS Bhejein</span>
+                </button>
+                <button
+                  onClick={() => handleDeliverToday(1)}
+                  className="flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-emerald-100 text-emerald-800 font-bold text-xs rounded-xl border border-emerald-200 transition-all ml-auto"
+                  title="Add 1 more bottle to today"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>+ 1 Bottle Aur Add Karein</span>
+                </button>
+              </div>
+            </div>
+          )
+        ) : (
+          <div className="mt-4 space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
+              {/* Regular Bottle Stepper */}
+              <div className="sm:col-span-3 p-3 bg-white rounded-xl border border-sky-100 flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-bold text-emerald-950">
-                    ✅ Aj ki delivery save ho chuki hai ({todayDelivery.quantity} Bottle{todayDelivery.quantity > 1 ? 's' : ''})
-                  </p>
-                  <p className="text-xs text-emerald-700">
-                    Delivered at <strong className="font-bold">{todayDelivery.time}</strong> • Amount: <strong>{fmt(todayDelivery.totalPrice)}</strong> ({todayDelivery.paymentStatus.toUpperCase()})
-                    {todayDelivery.emptyBottlesReceived ? ` • Khali cans return: ${todayDelivery.emptyBottlesReceived}` : ''}
-                  </p>
+                  <span className="text-[11px] font-bold text-sky-800 uppercase block">Daily Quota</span>
+                  <span className="text-xs text-gray-400">{customer.waterType || 'Regular Jar'}</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setTodayQty(Math.max(1, todayQty - 1))}
+                    className="w-7 h-7 bg-gray-50 hover:bg-gray-100 text-gray-800 border border-gray-200 rounded-lg font-bold flex items-center justify-center"
+                  >
+                    <Minus className="w-3 h-3" />
+                  </button>
+                  <span className="text-base font-black text-sky-950 w-6 text-center">{todayQty}</span>
+                  <button
+                    type="button"
+                    onClick={() => setTodayQty(todayQty + 1)}
+                    className="w-7 h-7 bg-sky-500 hover:bg-sky-600 text-white rounded-lg font-bold flex items-center justify-center"
+                  >
+                    <Plus className="w-3 h-3" />
+                  </button>
                 </div>
               </div>
-              <span className="text-xs font-bold text-emerald-800 bg-emerald-100 px-2.5 py-1 rounded-lg self-start sm:self-auto">
-                Delivered Today
-              </span>
-            </div>
 
-            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-emerald-200/50">
-              <button
-                onClick={() => handleSendDeliverySlipWhatsApp(todayDelivery)}
-                className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all"
-              >
-                <MessageSquare className="w-3.5 h-3.5" />
-                <span>WhatsApp Slip Bhejein</span>
-              </button>
-              <button
-                onClick={() => handleSendDeliverySlipSms(todayDelivery)}
-                className="flex items-center gap-1.5 px-3.5 py-2 bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all"
-              >
-                <Phone className="w-3.5 h-3.5" />
-                <span>Mobile SMS Bhejein</span>
-              </button>
-              <button
-                onClick={() => handleDeliverToday(1)}
-                className="flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-emerald-100 text-emerald-800 font-bold text-xs rounded-xl border border-emerald-200 transition-all ml-auto"
-                title="Add 1 more bottle to today"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>+ 1 Bottle Aur Add Karein</span>
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="mt-4 grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
-            {/* Bottle stepper */}
-            <div className="md:col-span-4 p-3 bg-white rounded-xl border border-sky-100 flex items-center justify-between">
-              <div>
-                <span className="text-[11px] font-bold text-sky-800 uppercase block">Bhari hui Bottles</span>
-                <span className="text-xs text-gray-400">{customer.waterType || 'Regular Jar'}</span>
+              {/* Extra Bottles Stepper */}
+              <div className="sm:col-span-3 p-3 bg-amber-50/60 rounded-xl border border-amber-200 flex items-center justify-between">
+                <div>
+                  <span className="text-[11px] font-bold text-amber-800 uppercase block">Extra Bottles (+)</span>
+                  <span className="text-xs text-amber-600">On-demand</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setTodayExtraBottles(Math.max(0, todayExtraBottles - 1))}
+                    className="w-7 h-7 bg-white hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg font-bold flex items-center justify-center"
+                  >
+                    <Minus className="w-3 h-3" />
+                  </button>
+                  <span className="text-base font-black text-amber-950 w-6 text-center">{todayExtraBottles}</span>
+                  <button
+                    type="button"
+                    onClick={() => setTodayExtraBottles(todayExtraBottles + 1)}
+                    className="w-7 h-7 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-bold flex items-center justify-center"
+                  >
+                    <Plus className="w-3 h-3" />
+                  </button>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setTodayQty(Math.max(1, todayQty - 1))}
-                  className="w-7 h-7 bg-gray-50 hover:bg-gray-100 text-gray-800 border border-gray-200 rounded-lg font-bold flex items-center justify-center"
-                >
-                  <Minus className="w-3 h-3" />
-                </button>
-                <span className="text-base font-black text-sky-950 w-6 text-center">{todayQty}</span>
-                <button
-                  type="button"
-                  onClick={() => setTodayQty(todayQty + 1)}
-                  className="w-7 h-7 bg-sky-500 hover:bg-sky-600 text-white rounded-lg font-bold flex items-center justify-center"
-                >
-                  <Plus className="w-3 h-3" />
-                </button>
-              </div>
-            </div>
 
-            {/* Empty cans stepper */}
-            <div className="md:col-span-3 p-3 bg-white rounded-xl border border-gray-200 flex items-center justify-between">
-              <div>
-                <span className="text-[11px] font-bold text-gray-700 uppercase block">Khali Can Wapis</span>
-                <span className="text-xs text-gray-400">Empty Return</span>
+              {/* Empty cans stepper */}
+              <div className="sm:col-span-3 p-3 bg-white rounded-xl border border-gray-200 flex items-center justify-between">
+                <div>
+                  <span className="text-[11px] font-bold text-gray-700 uppercase block">Khali Can Wapis</span>
+                  <span className="text-xs text-gray-400">Empty Return</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setTodayEmpty(Math.max(0, todayEmpty - 1))}
+                    className="w-7 h-7 bg-gray-50 hover:bg-gray-100 text-gray-800 border border-gray-200 rounded-lg font-bold flex items-center justify-center"
+                  >
+                    <Minus className="w-3 h-3" />
+                  </button>
+                  <span className="text-base font-black text-gray-900 w-6 text-center">{todayEmpty}</span>
+                  <button
+                    type="button"
+                    onClick={() => setTodayEmpty(todayEmpty + 1)}
+                    className="w-7 h-7 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-lg font-bold flex items-center justify-center"
+                  >
+                    <Plus className="w-3 h-3" />
+                  </button>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
+
+              {/* Payment status */}
+              <div className="sm:col-span-3 flex gap-1.5 justify-center">
                 <button
                   type="button"
-                  onClick={() => setTodayEmpty(Math.max(0, todayEmpty - 1))}
-                  className="w-7 h-7 bg-gray-50 hover:bg-gray-100 text-gray-800 border border-gray-200 rounded-lg font-bold flex items-center justify-center"
+                  onClick={() => setTodayPaymentStatus('unpaid')}
+                  className={`flex-1 py-2 px-2 rounded-xl text-xs font-bold transition-all text-center ${
+                    todayPaymentStatus === 'unpaid'
+                      ? 'bg-rose-100 text-rose-700 border border-rose-200'
+                      : 'bg-gray-50 text-gray-500 hover:bg-gray-100'
+                  }`}
                 >
-                  <Minus className="w-3 h-3" />
+                  Udhar
                 </button>
-                <span className="text-base font-black text-gray-900 w-6 text-center">{todayEmpty}</span>
                 <button
                   type="button"
-                  onClick={() => setTodayEmpty(todayEmpty + 1)}
-                  className="w-7 h-7 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-lg font-bold flex items-center justify-center"
+                  onClick={() => setTodayPaymentStatus('paid')}
+                  className={`flex-1 py-2 px-2 rounded-xl text-xs font-bold transition-all text-center ${
+                    todayPaymentStatus === 'paid'
+                      ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                      : 'bg-gray-50 text-gray-500 hover:bg-gray-100'
+                  }`}
                 >
-                  <Plus className="w-3 h-3" />
+                  Cash Paid
                 </button>
               </div>
             </div>
 
-            {/* Payment status */}
-            <div className="md:col-span-2 flex md:flex-col gap-1.5 justify-center">
-              <button
-                type="button"
-                onClick={() => setTodayPaymentStatus('unpaid')}
-                className={`flex-1 py-1 px-2 rounded-xl text-xs font-bold transition-all text-center ${
-                  todayPaymentStatus === 'unpaid'
-                    ? 'bg-rose-100 text-rose-700 border border-rose-200'
-                    : 'bg-gray-50 text-gray-500 hover:bg-gray-100'
-                }`}
-              >
-                Udhar (Credit)
-              </button>
-              <button
-                type="button"
-                onClick={() => setTodayPaymentStatus('paid')}
-                className={`flex-1 py-1 px-2 rounded-xl text-xs font-bold transition-all text-center ${
-                  todayPaymentStatus === 'paid'
-                    ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
-                    : 'bg-gray-50 text-gray-500 hover:bg-gray-100'
-                }`}
-              >
-                Cash Paid
-              </button>
-            </div>
+            {/* Quick Chips & Deliver Button */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
+              <div className="flex items-center gap-1.5 text-xs">
+                <span className="text-gray-500 font-semibold">Quick Extra:</span>
+                {[1, 2, 3, 5].map(amt => (
+                  <button
+                    key={amt}
+                    type="button"
+                    onClick={() => setTodayExtraBottles(amt)}
+                    className={`px-2 py-1 rounded-lg text-xs font-bold ${
+                      todayExtraBottles === amt ? 'bg-amber-500 text-white' : 'bg-amber-100 text-amber-800'
+                    }`}
+                  >
+                    +{amt} Extra
+                  </button>
+                ))}
+              </div>
 
-            {/* Action CTA Button */}
-            <div className="md:col-span-3">
               <button
                 onClick={() => handleDeliverToday()}
-                className="w-full py-2.5 bg-sky-500 hover:bg-sky-600 text-white font-bold text-xs rounded-xl shadow-md shadow-sky-500/20 flex items-center justify-center gap-2 transition-all"
+                className="py-2.5 px-6 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md shadow-emerald-600/20 flex items-center justify-center gap-2 transition-all"
               >
-                <Truck className="w-4 h-4" />
-                <span>Deliver {todayQty} & Bhejein Slip</span>
+                <Check className="w-4 h-4 stroke-[3]" />
+                <span>Deliver {todayQty + todayExtraBottles} Bottles (Tick ✅)</span>
               </button>
             </div>
           </div>
