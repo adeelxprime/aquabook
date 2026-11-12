@@ -723,7 +723,7 @@ export default function DeliveryBoys() {
                     title="Assign Route & Notify Rider"
                   >
                     <Send className="w-3 h-3" />
-                    <span>روٹ بھیجیں</span>
+                    <span>Route Bhejein</span>
                   </button>
                 </div>
               </Card>
