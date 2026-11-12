@@ -4,10 +4,15 @@ import { PageHeader, Card, Button, SearchInput, Modal, ConfirmDialog, FormInput,
 import { Truck, Plus, Edit, Trash2, Calendar, MessageSquare, Phone, Users, CheckSquare, Square, Check, X } from 'lucide-react';
 import { format } from 'date-fns';
 import { openWhatsAppDeliverySlip, openSmsDeliverySlip, getCustomerBalance } from '../services/dataService';
+import { getAuth } from '../services/adminService';
 import toast from 'react-hot-toast';
 
 export default function Deliveries() {
   const { customers, deliveries, addDelivery, updateDelivery, deleteDelivery, deliveryBoys, settings } = useApp();
+
+  const auth = getAuth();
+  const isDeliveryBoy = auth.userType === 'delivery_boy';
+  const loggedInRiderId = auth.deliveryBoyId || '';
 
   const [search, setSearch] = useState('');
   const [startDate, setStartDate] = useState('');
@@ -106,6 +111,10 @@ export default function Deliveries() {
 
   const handleBulkSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isDeliveryBoy) {
+      toast.error('Bulk delivery recording sirf Malik (Owner) kar sakta hai.');
+      return;
+    }
     if (bulkSelectedIds.length === 0) {
       toast.error('Baraye meharbani pehle customers select karein.');
       return;
@@ -150,6 +159,10 @@ export default function Deliveries() {
 
   const filtered = useMemo(() => {
     return deliveries.filter(d => {
+      // If delivery boy is logged in, only show their deliveries
+      if (isDeliveryBoy && loggedInRiderId && d.deliveryBoyId && d.deliveryBoyId !== loggedInRiderId) {
+        return false;
+      }
       const matchSearch = !search || d.customerName.toLowerCase().includes(search.toLowerCase());
       const matchPaymentStatus = filterStatus === 'all' || d.paymentStatus === filterStatus;
       const matchDeliveryStatus = filterDeliveryStatus === 'all' || 
@@ -214,6 +227,10 @@ export default function Deliveries() {
   };
 
   const openModal = (id?: string) => {
+    if (isDeliveryBoy) {
+      toast.error('Delivery record edit karne ya price set karne ki ijazat sirf Malik (Owner) ko hai.');
+      return;
+    }
     if (id) {
       const d = deliveries.find(x => x.id === id);
       if (!d) return;
@@ -279,6 +296,10 @@ export default function Deliveries() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isDeliveryBoy) {
+      toast.error('Aapko delivery edit karne ya rate change karne ki ijazat nahi hai.');
+      return;
+    }
     if (!validate()) return;
     const customer = customers.find(c => c.id === form.customerId);
     const rider = deliveryBoys.find(b => b.id === form.deliveryBoyId);
@@ -314,6 +335,10 @@ export default function Deliveries() {
   };
 
   const handleDelete = () => {
+    if (isDeliveryBoy) {
+      toast.error('Delivery record delete karne ki ijazat sirf Malik (Owner) ko hai.');
+      return;
+    }
     if (deleteId) { deleteDelivery(deleteId); toast.success('Delivery deleted'); setDeleteId(null); }
   };
 
@@ -342,21 +367,23 @@ export default function Deliveries() {
   return (
     <div className="space-y-6 pb-20 lg:pb-0">
       <PageHeader 
-        title="Delivery Records" 
-        subtitle={`${deliveries.length} total deliveries recorded`} 
+        title={isDeliveryBoy ? "My Delivery History" : "Delivery Records"} 
+        subtitle={`${filtered.length} deliveries`} 
         action={
-          <div className="flex flex-wrap items-center gap-2">
-            <Button 
-              variant="secondary" 
-              onClick={() => setIsBulkModalOpen(true)} 
-              icon={<Users className="w-4 h-4 text-sky-600" />}
-            >
-              Multi-Customer Delivery
-            </Button>
-            <Button onClick={() => openModal()} icon={<Plus className="w-4 h-4" />}>
-              Record Delivery
-            </Button>
-          </div>
+          !isDeliveryBoy ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <Button 
+                variant="secondary" 
+                onClick={() => setIsBulkModalOpen(true)} 
+                icon={<Users className="w-4 h-4 text-sky-600" />}
+              >
+                Multi-Customer Delivery
+              </Button>
+              <Button onClick={() => openModal()} icon={<Plus className="w-4 h-4" />}>
+                Record Delivery
+              </Button>
+            </div>
+          ) : null
         } 
       />
 
@@ -497,8 +524,12 @@ export default function Deliveries() {
                               >
                                 <Phone className="w-4 h-4" />
                               </button>
-                              <button onClick={() => openModal(d.id)} className="p-2 hover:bg-gray-100 rounded-lg transition-colors"><Edit className="w-4 h-4 text-gray-500" /></button>
-                              <button onClick={() => setDeleteId(d.id)} className="p-2 hover:bg-red-50 rounded-lg transition-colors"><Trash2 className="w-4 h-4 text-red-400" /></button>
+                              {!isDeliveryBoy && (
+                                <>
+                                  <button onClick={() => openModal(d.id)} className="p-2 hover:bg-gray-100 rounded-lg transition-colors" title="Edit"><Edit className="w-4 h-4 text-gray-500" /></button>
+                                  <button onClick={() => setDeleteId(d.id)} className="p-2 hover:bg-red-50 rounded-lg transition-colors" title="Delete"><Trash2 className="w-4 h-4 text-red-400" /></button>
+                                </>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -579,10 +610,12 @@ export default function Deliveries() {
                     </button>
                   </div>
 
-                  <div className="flex gap-2">
-                    <Button size="sm" variant="secondary" className="flex-1" onClick={() => openModal(d.id)} icon={<Edit className="w-3.5 h-3.5" />}>Edit</Button>
-                    <Button size="sm" variant="danger" className="flex-1" onClick={() => setDeleteId(d.id)} icon={<Trash2 className="w-3.5 h-3.5" />}>Delete</Button>
-                  </div>
+                  {!isDeliveryBoy && (
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="secondary" className="flex-1" onClick={() => openModal(d.id)} icon={<Edit className="w-3.5 h-3.5" />}>Edit</Button>
+                      <Button size="sm" variant="danger" className="flex-1" onClick={() => setDeleteId(d.id)} icon={<Trash2 className="w-3.5 h-3.5" />}>Delete</Button>
+                    </div>
+                  )}
                 </Card>
               );
             })}
