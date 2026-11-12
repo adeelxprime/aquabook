@@ -33,7 +33,7 @@ export default function QuickDelivery() {
   const loggedInRiderId = auth.deliveryBoyId || '';
 
   const activeRouteNotification = useMemo(() => {
-    if (!isRiderLoggedIn || !loggedInRiderId) return null;
+    if (!isRiderLoggedIn || !loggedInRiderId || typeof getActiveRouteForRider !== 'function') return null;
     return getActiveRouteForRider(loggedInRiderId);
   }, [isRiderLoggedIn, loggedInRiderId, getActiveRouteForRider]);
 
@@ -46,6 +46,12 @@ export default function QuickDelivery() {
   const [selectedRiderId, setSelectedRiderId] = useState<string>(
     isRiderLoggedIn && loggedInRiderId ? loggedInRiderId : (riderParam || 'all')
   );
+
+  // Active delivery boy info (must be defined before areas and distinctBlocks)
+  const selectedRider = useMemo(() => {
+    if (selectedRiderId === 'all') return null;
+    return deliveryBoys.find(b => b.id === selectedRiderId) || null;
+  }, [deliveryBoys, selectedRiderId]);
 
   useEffect(() => {
     if (blockParam) setBlockFilter(blockParam);
@@ -162,12 +168,6 @@ export default function QuickDelivery() {
     });
     return map;
   }, [deliveries, selectedDate]);
-
-  // Active delivery boy info
-  const selectedRider = useMemo(() => {
-    if (selectedRiderId === 'all') return null;
-    return deliveryBoys.find(b => b.id === selectedRiderId) || null;
-  }, [deliveryBoys, selectedRiderId]);
 
   // Filtered customer list
   const filteredCustomers = useMemo(() => {
@@ -719,7 +719,9 @@ export default function QuickDelivery() {
               <button
                 type="button"
                 onClick={() => {
-                  acknowledgeRouteDispatch(activeRouteNotification.id);
+                  if (typeof acknowledgeRouteDispatch === 'function') {
+                    acknowledgeRouteDispatch(activeRouteNotification.id);
+                  }
                   if (activeRouteNotification.areaOrBlock && activeRouteNotification.areaOrBlock !== 'All Assigned Areas') {
                     if (distinctBlocks.includes(activeRouteNotification.areaOrBlock)) {
                       setBlockFilter(activeRouteNotification.areaOrBlock);
