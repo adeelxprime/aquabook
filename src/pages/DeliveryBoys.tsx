@@ -8,7 +8,8 @@ import type { DeliveryBoy } from '../types';
 import { 
   Users, UserPlus, Phone, Bike, Truck, Check, X, Clock, 
   MessageSquare, Edit, Trash2, MapPin, Target, Droplets, 
-  DollarSign, AlertCircle, ExternalLink, ShieldCheck, Building2, RefreshCw
+  DollarSign, AlertCircle, ExternalLink, ShieldCheck, Building2, RefreshCw,
+  Send, Bell, CheckCircle2
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
@@ -18,6 +19,7 @@ export default function DeliveryBoys() {
   const navigate = useNavigate();
   const { 
     deliveryBoys, addDeliveryBoy, updateDeliveryBoy, deleteDeliveryBoy, 
+    dispatchRouteToRider,
     customers, deliveries, settings, syncFromCloud, isSyncing
   } = useApp();
 
@@ -65,6 +67,113 @@ export default function DeliveryBoys() {
     });
     return Array.from(set);
   }, [customers]);
+
+  // Route Dispatch & Notification State
+  const [dispatchBoy, setDispatchBoy] = useState<DeliveryBoy | null>(null);
+  const [selectedRouteTarget, setSelectedRouteTarget] = useState<string>('all_assigned');
+  const [customRouteNote, setCustomRouteNote] = useState<string>('Jaldi se water deliver kar ke register update karein!');
+
+  const handleOpenDispatch = (boy: DeliveryBoy) => {
+    setDispatchBoy(boy);
+    const defaultTarget = boy.assignedBlocks?.[0] || boy.assignedAreas?.[0] || 'all_assigned';
+    setSelectedRouteTarget(defaultTarget);
+    setCustomRouteNote('Jaldi se water deliver kar ke register update karein!');
+  };
+
+  const dispatchRouteMetrics = useMemo(() => {
+    if (!dispatchBoy) return { count: 0, bottles: 0, routeLabel: '' };
+
+    const isAllAssigned = selectedRouteTarget === 'all_assigned';
+    const assignedBlocks = dispatchBoy.assignedBlocks || [];
+    const assignedAreas = dispatchBoy.assignedAreas || [];
+
+    const matchedCustomers = customers.filter(c => {
+      if (c.status !== 'active') return false;
+      if (isAllAssigned) {
+        if (c.assignedDeliveryBoyId === dispatchBoy.id) return true;
+        if (c.assignedDeliveryBoyId && c.assignedDeliveryBoyId !== dispatchBoy.id) return false;
+        if (c.block && assignedBlocks.includes(c.block)) return true;
+        if (c.area && assignedAreas.includes(c.area)) return true;
+        return false;
+      } else {
+        const matchesTarget = (c.block && c.block === selectedRouteTarget) || (c.area && c.area === selectedRouteTarget);
+        if (!matchesTarget) return false;
+        if (c.assignedDeliveryBoyId && c.assignedDeliveryBoyId !== dispatchBoy.id) return false;
+        return true;
+      }
+    });
+
+    const count = matchedCustomers.length;
+    const bottles = matchedCustomers.reduce((sum, c) => sum + (c.defaultQuantity || 1), 0);
+    const routeLabel = isAllAssigned
+      ? (assignedBlocks.join(', ') || assignedAreas.join(', ') || 'All Assigned Areas')
+      : selectedRouteTarget;
+
+    return { count, bottles, routeLabel };
+  }, [dispatchBoy, selectedRouteTarget, customers]);
+
+  const handleSendWhatsAppNotification = () => {
+    if (!dispatchBoy) return;
+    const { count, bottles, routeLabel } = dispatchRouteMetrics;
+
+    dispatchRouteToRider({
+      riderId: dispatchBoy.id,
+      riderName: dispatchBoy.name,
+      riderPhone: dispatchBoy.phone,
+      areaOrBlock: routeLabel || 'Assigned Route',
+      customerCount: count,
+      bottleCount: bottles,
+      message: customRouteNote.trim(),
+    });
+
+    const cleanPhone = dispatchBoy.phone.replace(/[^0-9]/g, '');
+    const targetPhone = cleanPhone.startsWith('0') ? '92' + cleanPhone.substring(1) : cleanPhone;
+
+    const textMsg = `Salam ${dispatchBoy.name} bhai! Aapka route "${routeLabel || 'Today Route'}" assign ho gaya hai (${count} Customers, ~${bottles} Bottles).${customRouteNote.trim() ? ' Hidayat: ' + customRouteNote.trim() + '.' : ''} Apne mobile pe login kar ke deliver karein. - AquaBook`;
+
+    window.open(`https://wa.me/${targetPhone}?text=${encodeURIComponent(textMsg)}`, '_blank');
+    toast.success(`✅ ${dispatchBoy.name} ko WhatsApp route alert bhej diya gaya hai!`);
+    setDispatchBoy(null);
+  };
+
+  const handleSendSmsNotification = () => {
+    if (!dispatchBoy) return;
+    const { count, bottles, routeLabel } = dispatchRouteMetrics;
+
+    dispatchRouteToRider({
+      riderId: dispatchBoy.id,
+      riderName: dispatchBoy.name,
+      riderPhone: dispatchBoy.phone,
+      areaOrBlock: routeLabel || 'Assigned Route',
+      customerCount: count,
+      bottleCount: bottles,
+      message: customRouteNote.trim(),
+    });
+
+    const textMsg = `Salam ${dispatchBoy.name}! Route "${routeLabel}" assign ho gaya (${count} Customers, ~${bottles} Bottles).${customRouteNote.trim() ? ' ' + customRouteNote.trim() : ''} Login kar ke delivery shuru karein. - AquaBook`;
+
+    window.open(`sms:${dispatchBoy.phone}?body=${encodeURIComponent(textMsg)}`, '_self');
+    toast.success(`✅ ${dispatchBoy.name} ke liye SMS route alert open ho gaya!`);
+    setDispatchBoy(null);
+  };
+
+  const handleSaveInAppNotification = () => {
+    if (!dispatchBoy) return;
+    const { count, bottles, routeLabel } = dispatchRouteMetrics;
+
+    dispatchRouteToRider({
+      riderId: dispatchBoy.id,
+      riderName: dispatchBoy.name,
+      riderPhone: dispatchBoy.phone,
+      areaOrBlock: routeLabel || 'Assigned Route',
+      customerCount: count,
+      bottleCount: bottles,
+      message: customRouteNote.trim(),
+    });
+
+    toast.success(`✅ Route notify ho gaya! ${dispatchBoy.name} ke mobile login par alert show hoga.`);
+    setDispatchBoy(null);
+  };
 
   // Open Add Modal
   const handleOpenAdd = () => {
@@ -609,19 +718,12 @@ export default function DeliveryBoys() {
                   </a>
 
                   <button
-                    onClick={() => {
-                      const firstBlock = boy.assignedBlocks?.[0];
-                      const firstArea = boy.assignedAreas?.[0];
-                      let url = `/quick-delivery?rider=${boy.id}`;
-                      if (firstBlock) url += `&block=${encodeURIComponent(firstBlock)}`;
-                      if (firstArea) url += `&area=${encodeURIComponent(firstArea)}`;
-                      navigate(url);
-                    }}
-                    className="py-1.5 bg-sky-500 hover:bg-sky-600 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1 shadow-xs transition-all"
-                    title="Open Route for this rider"
+                    onClick={() => handleOpenDispatch(boy)}
+                    className="py-1.5 bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-600 hover:to-blue-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs transition-all active:scale-95"
+                    title="Assign Route & Notify Rider"
                   >
-                    <span>Route</span>
-                    <ExternalLink className="w-3 h-3" />
+                    <Send className="w-3 h-3" />
+                    <span>روٹ بھیجیں</span>
                   </button>
                 </div>
               </Card>
@@ -875,6 +977,191 @@ export default function DeliveryBoys() {
         confirmText="Remove"
         variant="danger"
       />
+
+      {/* Route Dispatch & Rider Notification Modal */}
+      {dispatchBoy && (
+        <Modal
+          isOpen={!!dispatchBoy}
+          onClose={() => setDispatchBoy(null)}
+          title={`🚀 Assign Route & Notify: ${dispatchBoy.name}`}
+          size="md"
+        >
+          <div className="space-y-4">
+            {/* Rider Info Card */}
+            <div className="p-3 bg-gradient-to-r from-sky-50 via-blue-50 to-indigo-50 border border-sky-100 rounded-2xl flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-sky-600 text-white flex items-center justify-center font-bold text-sm shadow-xs">
+                  <Bike className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-gray-900">{dispatchBoy.name}</h4>
+                  <p className="text-xs text-gray-600 font-medium flex items-center gap-1.5">
+                    <Phone className="w-3 h-3 text-sky-600" />
+                    <span>{dispatchBoy.phone}</span>
+                    {dispatchBoy.vehicleNumber && <span>• {dispatchBoy.vehicleNumber}</span>}
+                  </p>
+                </div>
+              </div>
+              <div className="text-right">
+                <span className="text-[10px] uppercase font-bold text-sky-700 block">Rider Target</span>
+                <span className="text-xs font-black text-sky-900">{dispatchBoy.dailyTarget || 50} Bottles</span>
+              </div>
+            </div>
+
+            {/* Select Target Route (Area / Block) */}
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1.5">
+                Konse Area ya Block me deliver karne bhejna hai?
+              </label>
+              <select
+                value={selectedRouteTarget}
+                onChange={e => setSelectedRouteTarget(e.target.value)}
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-xs font-bold text-gray-800 focus:outline-none focus:ring-2 focus:ring-sky-500 shadow-2xs"
+              >
+                <option value="all_assigned">
+                  📍 Sab Assigned Areas & Blocks ({dispatchBoy.assignedBlocks?.join(', ') || dispatchBoy.assignedAreas?.join(', ') || 'All Routes'})
+                </option>
+                
+                {/* Rider's specifically assigned blocks */}
+                {dispatchBoy.assignedBlocks && dispatchBoy.assignedBlocks.length > 0 && (
+                  <optgroup label="🏢 Rider's Assigned Blocks">
+                    {dispatchBoy.assignedBlocks.map(b => (
+                      <option key={`blk_${b}`} value={b}>🏢 Block: {b}</option>
+                    ))}
+                  </optgroup>
+                )}
+
+                {/* Rider's specifically assigned areas */}
+                {dispatchBoy.assignedAreas && dispatchBoy.assignedAreas.length > 0 && (
+                  <optgroup label="📍 Rider's Assigned Areas">
+                    {dispatchBoy.assignedAreas.map(a => (
+                      <option key={`area_${a}`} value={a}>📍 Area: {a}</option>
+                    ))}
+                  </optgroup>
+                )}
+
+                {/* Other Available Blocks in system */}
+                <optgroup label="🌐 Other Plant Blocks">
+                  {availableBlocks
+                    .filter(b => !dispatchBoy.assignedBlocks?.includes(b))
+                    .map(b => (
+                      <option key={`other_blk_${b}`} value={b}>🏢 Block: {b}</option>
+                    ))}
+                </optgroup>
+
+                {/* Other Available Areas in system */}
+                <optgroup label="🌐 Other Plant Areas">
+                  {availableAreas
+                    .filter(a => !dispatchBoy.assignedAreas?.includes(a))
+                    .map(a => (
+                      <option key={`other_area_${a}`} value={a}>📍 Area: {a}</option>
+                    ))}
+                </optgroup>
+              </select>
+            </div>
+
+            {/* Route Stats Summary Box */}
+            <div className="p-3 bg-amber-50/70 border border-amber-200/80 rounded-2xl flex items-center justify-around text-center">
+              <div>
+                <span className="text-[10px] font-bold text-amber-700 block uppercase">Kul Customers</span>
+                <span className="text-base font-black text-amber-950">{dispatchRouteMetrics.count}</span>
+              </div>
+              <div className="w-px h-8 bg-amber-200" />
+              <div>
+                <span className="text-[10px] font-bold text-amber-700 block uppercase">Estimated Bottles</span>
+                <span className="text-base font-black text-amber-950">~{dispatchRouteMetrics.bottles}</span>
+              </div>
+              <div className="w-px h-8 bg-amber-200" />
+              <div>
+                <span className="text-[10px] font-bold text-amber-700 block uppercase">Selected Target</span>
+                <span className="text-xs font-bold text-amber-900 truncate max-w-[120px] block">
+                  {dispatchRouteMetrics.routeLabel || 'Route'}
+                </span>
+              </div>
+            </div>
+
+            {/* Instruction Message */}
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1">
+                Rider ke liye Hidayat / Custom Message (Optional):
+              </label>
+              <textarea
+                value={customRouteNote}
+                onChange={e => setCustomRouteNote(e.target.value)}
+                placeholder="e.g. Jaldi se water deliver kar ke register update karein!"
+                rows={2}
+                className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs text-gray-800 font-medium focus:outline-none focus:ring-2 focus:ring-sky-500"
+              />
+            </div>
+
+            {/* Action Buttons */}
+            <div className="space-y-2 pt-2 border-t border-gray-100">
+              <div className="text-[11px] font-bold text-gray-500 mb-1">
+                Rider ko notification bhejain:
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {/* 1. WhatsApp Notification */}
+                <button
+                  type="button"
+                  onClick={handleSendWhatsAppNotification}
+                  className="w-full py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-xs transition-all active:scale-95"
+                >
+                  <MessageSquare className="w-4 h-4" />
+                  <span>Send WhatsApp Alert</span>
+                </button>
+
+                {/* 2. SMS Notification */}
+                <button
+                  type="button"
+                  onClick={handleSendSmsNotification}
+                  className="w-full py-2.5 px-3 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-xs transition-all active:scale-95"
+                >
+                  <Send className="w-4 h-4" />
+                  <span>Send SMS Alert</span>
+                </button>
+              </div>
+
+              {/* 3. In-App Notification (without opening WA/SMS) */}
+              <button
+                type="button"
+                onClick={handleSaveInAppNotification}
+                className="w-full py-2 px-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all"
+              >
+                <Bell className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Save In-App Route Notification (Rider App Alert)</span>
+              </button>
+
+              {/* Secondary link: If owner wants to view route themselves */}
+              <div className="pt-2 flex items-center justify-between text-xs text-gray-500">
+                <button
+                  type="button"
+                  onClick={() => setDispatchBoy(null)}
+                  className="text-gray-500 hover:text-gray-700 font-bold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const boy = dispatchBoy;
+                    setDispatchBoy(null);
+                    let url = `/quick-delivery?rider=${boy.id}`;
+                    if (selectedRouteTarget !== 'all_assigned') {
+                      url += `&block=${encodeURIComponent(selectedRouteTarget)}`;
+                    }
+                    navigate(url);
+                  }}
+                  className="text-sky-600 hover:text-sky-800 font-bold flex items-center gap-1"
+                >
+                  <span>Open Route View Screen</span>
+                  <ExternalLink className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

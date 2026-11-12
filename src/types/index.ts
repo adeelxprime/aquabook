@@ -62,6 +62,20 @@ export interface DeliveryBoy {
   updatedAt: string;
 }
 
+export interface RouteDispatchRecord {
+  id: string;
+  businessId?: string;
+  riderId: string;
+  riderName: string;
+  riderPhone: string;
+  areaOrBlock: string;
+  customerCount: number;
+  bottleCount: number;
+  message?: string;
+  dispatchedAt: string;
+  status: 'active' | 'acknowledged' | 'completed';
+}
+
 export interface TruckSupply {
   id: string;
   tripNumber?: string;

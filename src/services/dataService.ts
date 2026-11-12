@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import type { Customer, Delivery, Payment, Settings, CustomerMonthlyBill, DeliveryBoy, TruckSupply } from '../types';
+import type { Customer, Delivery, Payment, Settings, CustomerMonthlyBill, DeliveryBoy, TruckSupply, RouteDispatchRecord } from '../types';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -634,38 +634,27 @@ export function formatDeliverySlipWhatsApp(
   const timeFormatted = formatTime12(delivery.time);
 
   if (delivery.status === 'skipped') {
-    return `💧 *${biz.toUpperCase()}* 💧
-❌ *Water Delivery Notice (Pani Nahi Gya)*
-━━━━━━━━━━━━━━━━━━━━
-👤 *Customer:* *${customer.name}*
-📅 *Tareekh:* ${delivery.date} (${timeFormatted})
-⚠️ *Status:* *Delivery Missed / Skipped*
-❓ *Wajah:* ${delivery.skipReason || 'Ghar band ya phone nahi uthaya'}
-${delivery.deliveryBoyName ? `🛵 *Delivery Boy:* ${delivery.deliveryBoyName}\n` : ''}━━━━━━━━━━━━━━━━━━━━
-Agar aapko pani ki zaroorat hai to foran call karein:
-${phone ? `📞 Rabta: ${phone}\n` : ''}🙏 Shukriya!`;
+    const reason = delivery.skipReason || 'Ghar band tha ya phone nahi uthaya';
+    return `Salam ${customer.name}!
+Aj aapki water delivery nahi ho saki (Wajah: ${reason}).
+Agar pani chahiye to rabta karein${phone ? `: ${phone}` : ''}.
+Shukriya! - ${biz}`;
   }
 
-  const extraInfo = delivery.extraBottles && delivery.extraBottles > 0
-    ? ` (${delivery.regularQuantity || delivery.quantity - delivery.extraBottles} Regular + 🍾 *${delivery.extraBottles} Extra*)`
+  const extraTxt = delivery.extraBottles && delivery.extraBottles > 0
+    ? ` (+${delivery.extraBottles} Extra)`
     : '';
 
-  const emptyStatusText = (delivery.emptyBottlesReceived && delivery.emptyBottlesReceived > 0)
-    ? `✅ *${delivery.emptyBottlesReceived} Can(s) Wapis Mile*`
-    : `❌ *Khali Can Nahi Mila (Baqi / Pending)*`;
+  const emptyTxt = delivery.emptyBottlesReceived && delivery.emptyBottlesReceived > 0
+    ? `Khali can: ${delivery.emptyBottlesReceived} wapis`
+    : `Khali can: pending`;
 
-  return `💧 *${biz.toUpperCase()}* 💧
-🚚 *Daily Water Delivery Slip*
-━━━━━━━━━━━━━━━━━━━━
-👤 *Customer:* *${customer.name}*
-📅 *Tareekh:* ${delivery.date} (${timeFormatted})
-📦 *Aj Deliver:* *${delivery.quantity} Bottle(s)*${extraInfo} (${delivery.waterType || 'Regular'})
-🔄 *Khali Can:* ${emptyStatusText}
-💵 *Aj Ka Bill:* *${sym} ${delivery.totalPrice}* (${delivery.paymentStatus === 'paid' ? '✅ Paid' : '⏳ Udhar'})
-${delivery.deliveryBoyName ? `🛵 *Delivered By:* ${delivery.deliveryBoyName}\n` : ''}📊 *Month Total Bottles:* *${monthTotal} Bottles*
-⚠️ *Kul Baqiya (Due):* *${sym} ${balance.outstandingBalance.toLocaleString()}*
-━━━━━━━━━━━━━━━━━━━━
-${phone ? `📞 Rabta: ${phone}\n` : ''}🙏 Shukriya!`;
+  const payStatus = delivery.paymentStatus === 'paid' ? 'Paid' : 'Udhar';
+
+  return `Salam ${customer.name}!
+Aj ${delivery.quantity} water bottle${extraTxt} deliver ho gayi.
+Bill: ${sym} ${delivery.totalPrice} (${payStatus}) | ${emptyTxt} | Baqaya: ${sym} ${balance.outstandingBalance}.
+Shukriya! - ${biz}${phone ? ` (${phone})` : ''}`;
 }
 
 export function formatDeliverySlipSms(
@@ -676,17 +665,16 @@ export function formatDeliverySlipSms(
   monthBottles?: number
 ): string {
   const sym = settings.currencySymbol || 'Rs.';
-  const biz = settings.businessName || 'AquaBook Water';
-  const monthTotal = monthBottles !== undefined ? monthBottles : getMonthBottlesForCustomer(customer.id, delivery.date.slice(0, 7));
-  const timeFormatted = formatTime12(delivery.time);
+  const biz = settings.businessName || 'AquaBook';
+  const phone = settings.businessPhone || '';
+  const extraTxt = delivery.extraBottles && delivery.extraBottles > 0 ? ` (+${delivery.extraBottles} Extra)` : '';
+  const payStatus = delivery.paymentStatus === 'paid' ? 'Paid' : 'Udhar';
 
   if (delivery.status === 'skipped') {
-    return `[${biz}] Salam ${customer.name}, Aj ${delivery.date} ko delivery nahi ho saki. Wajah: ${delivery.skipReason || 'Ghar band tha'}. Pani chahiye to rabta karein: ${settings.businessPhone || ''}`;
+    return `[${biz}] Salam ${customer.name}, aj delivery nahi ho saki (${delivery.skipReason || 'Ghar band tha'}). Rabta: ${phone}`;
   }
 
-  const extraTxt = delivery.extraBottles && delivery.extraBottles > 0 ? ` (+${delivery.extraBottles} Extra)` : '';
-
-  return `[${biz}] Salam ${customer.name}, Aj ${delivery.date} ko ${timeFormatted} par ${delivery.quantity} bottle${extraTxt} deliver hui. Khali can wapis: ${delivery.emptyBottlesReceived || 0}. Is maheene total: ${monthTotal} bottles. Aj ka bill: ${sym} ${delivery.totalPrice}. Kul Baqaya: ${sym} ${balance.outstandingBalance}. Shukriya!`;
+  return `[${biz}] Salam ${customer.name}! Aj ${delivery.quantity} bottle${extraTxt} deliver hui. Bill: ${sym} ${delivery.totalPrice} (${payStatus}). Baqaya: ${sym} ${balance.outstandingBalance}. Shukriya!`;
 }
 
 export function openWhatsAppDeliverySlip(
@@ -725,36 +713,36 @@ export function formatTruckSupplyWhatsApp(
   const timeFormatted = formatTime12(trip.time);
 
   if (trip.status === 'skipped') {
-    return `💧 *${biz.toUpperCase()} - BULK SUPPLY* 💧
-❌ *Trip Cancelled / Not Supplied (Pani Nahi Gya)*
-━━━━━━━━━━━━━━━━━━━━
-🏢 *Client / Site:* *${trip.clientName}*
-🚛 *Vehicle:* ${trip.vehicleNumber} (${trip.vehicleType.toUpperCase()})
-👤 *Driver / Staff:* ${trip.driverName}
-📅 *Tareekh:* ${trip.date} (${timeFormatted})
-⚠️ *Wajah:* ${trip.skipReason || 'Site closed or trip cancelled'}
-━━━━━━━━━━━━━━━━━━━━
-${phone ? `📞 Rabta: ${phone}\n` : ''}🙏 Shukriya!`;
+    return `*${biz.toUpperCase()} - BULK SUPPLY*
+*Trip Cancelled / Not Supplied (Pani Nahi Gya)*
+----------------------------------------
+*Client / Site:* *${trip.clientName}*
+*Vehicle:* ${trip.vehicleNumber} (${trip.vehicleType.toUpperCase()})
+*Driver / Staff:* ${trip.driverName}
+*Tareekh:* ${trip.date} (${timeFormatted})
+*Wajah:* ${trip.skipReason || 'Site closed or trip cancelled'}
+----------------------------------------
+${phone ? `Rabta: ${phone}\n` : ''}Shukriya!`;
   }
 
   const extra = trip.extraQuantity && trip.extraQuantity > 0 ? ` (+${trip.extraQuantity} Extra)` : '';
   const typeLabel = trip.supplyType === 'tanker_water' ? 'Water Tanker (Liters)' : 'Bulk Water Containers';
 
-  return `💧 *${biz.toUpperCase()} - BULK SUPPLY DISPATCH* 💧
-🚚 *Trip Challan / Delivery Slip*
-━━━━━━━━━━━━━━━━━━━━
-🏢 *Client / Site:* *${trip.clientName}*
-🚛 *Vehicle No:* *${trip.vehicleNumber}*
-👤 *Driver / Staff:* *${trip.driverName}*
-📅 *Tareekh:* ${trip.date} (${timeFormatted})
-📍 *Address:* ${trip.destinationAddress || 'N/A'}
-━━━━━━━━━━━━━━━━━━━━
-📦 *Supply Type:* ${typeLabel}
-💧 *Supplied Qty:* *${trip.quantitySupplied}${extra}*
-💵 *Total Amount:* *${sym} ${trip.totalAmount.toLocaleString()}*
-💳 *Payment Status:* *${trip.paymentStatus.toUpperCase()}* (${sym} ${trip.paidAmount} Paid)
-${trip.notes ? `📝 *Notes:* ${trip.notes}\n` : ''}━━━━━━━━━━━━━━━━━━━━
-${phone ? `📞 Rabta: ${phone}\n` : ''}🙏 Shukriya!`;
+  return `*${biz.toUpperCase()} - BULK SUPPLY DISPATCH*
+*Trip Challan / Delivery Slip*
+----------------------------------------
+*Client / Site:* *${trip.clientName}*
+*Vehicle No:* *${trip.vehicleNumber}*
+*Driver / Staff:* *${trip.driverName}*
+*Tareekh:* ${trip.date} (${timeFormatted})
+*Address:* ${trip.destinationAddress || 'N/A'}
+----------------------------------------
+*Supply Type:* ${typeLabel}
+*Supplied Qty:* *${trip.quantitySupplied}${extra}*
+*Total Amount:* *${sym} ${trip.totalAmount.toLocaleString()}*
+*Payment Status:* *${trip.paymentStatus.toUpperCase()}* (${sym} ${trip.paidAmount} Paid)
+${trip.notes ? `*Notes:* ${trip.notes}\n` : ''}----------------------------------------
+${phone ? `Rabta: ${phone}\n` : ''}Shukriya!`;
 }
 
 export function openWhatsAppTruckSlip(trip: TruckSupply, settings: Settings) {
@@ -774,18 +762,14 @@ export function getAllCustomersMonthlyBills(monthStr: string): CustomerMonthlyBi
 
 export function formatWhatsAppBillMessage(bill: CustomerMonthlyBill, settings: Settings): string {
   const sym = settings.currencySymbol || 'Rs.';
-  const biz = settings.businessName || 'AquaBook Water Supply';
+  const biz = settings.businessName || 'AquaBook Water';
   const phone = settings.businessPhone || '';
 
-  return `💧 *${biz.toUpperCase()}* 💧
-🧾 *Mahana Bill - ${bill.monthName}*
-━━━━━━━━━━━━━━━━━━━━
-👤 *Customer:* *${bill.customerName}*
-📦 *Total Bottles:* *${bill.totalBottles} Bottles*
-💵 *Is Mahine Ka Bill:* *${sym} ${bill.monthCharges.toLocaleString()}*
-${bill.previousBalance > 0 ? `⏳ *Purana Baqiya:* *${sym} ${bill.previousBalance.toLocaleString()}*\n` : ''}${bill.totalPaidInMonth > 0 ? `💳 *Wasool (Paid):* *${sym} ${bill.totalPaidInMonth.toLocaleString()}*\n` : ''}🔴 *KUL WAJIB-UL-ADA (DUE):* *${sym} ${bill.netOutstanding.toLocaleString()} /-*
-━━━━━━━━━━━━━━━━━━━━
-${phone ? `📞 Rabta: ${phone}\n` : ''}🙏 Shukriya!`;
+  return `Salam ${bill.customerName}!
+Aapka ${bill.monthName} ka water bill:
+Kul Bottles: ${bill.totalBottles} | Is Mahine Ka Bill: ${sym} ${bill.monthCharges.toLocaleString()}${bill.previousBalance > 0 ? ` | Purana Baqaya: ${sym} ${bill.previousBalance.toLocaleString()}` : ''}.
+Kul Wajib-ul-ada (Due): ${sym} ${bill.netOutstanding.toLocaleString()} /-.
+Shukriya! - ${biz}${phone ? ` (${phone})` : ''}`;
 }
 
 export function formatFullCalendarWhatsAppMessage(bill: CustomerMonthlyBill, settings: Settings): string {
@@ -821,28 +805,28 @@ export function formatFullCalendarWhatsAppMessage(bill: CustomerMonthlyBill, set
     totalEmptyReturned += dayEmpty;
 
     if (dayQty > 0) {
-      const extraText = dayExtra > 0 ? ` (Extra: +${dayExtra} 🍾)` : '';
-      const emptyText = dayEmpty > 0 ? ` [Khali: ${dayEmpty} ✅]` : ` [Khali: 0 ❌]`;
-      dailyLines += `📅 ${String(day).padStart(2, '0')} ${bill.monthName.slice(0, 3)}: *${dayQty} Jar(s)*${extraText}${emptyText}\n`;
+      const extraText = dayExtra > 0 ? ` (Extra: +${dayExtra})` : '';
+      const emptyText = dayEmpty > 0 ? ` [Khali: ${dayEmpty}]` : ` [Khali: 0]`;
+      dailyLines += `${String(day).padStart(2, '0')} ${bill.monthName.slice(0, 3)}: *${dayQty} Jar(s)*${extraText}${emptyText}\n`;
     } else if (skipped.length > 0) {
       const reason = skipped[0].skipReason || 'Pani Nahi Gya';
-      dailyLines += `📅 ${String(day).padStart(2, '0')} ${bill.monthName.slice(0, 3)}: ❌ *Pani Nahi Gya* (${reason})\n`;
+      dailyLines += `${String(day).padStart(2, '0')} ${bill.monthName.slice(0, 3)}: *Pani Nahi Gya* (${reason})\n`;
     }
   }
 
-  return `💧 *${biz.toUpperCase()}* 💧
-🧾 *Rozana 1 se ${totalDays} Date Ka Hisab Statement*
-📅 *Mahina:* ${bill.monthName}
-👤 *Customer:* *${bill.customerName}*
-━━━━━━━━━━━━━━━━━━━━
-📦 *ROZANA BOTTLE DETAILS (1-to-31):*
-${dailyLines || 'Is mahine koi delivery record nahi hua.\n'}━━━━━━━━━━━━━━━━━━━━
-📊 *Total Bottles:* *${bill.totalBottles} Bottles* ${totalExtra > 0 ? `(Extra: ${totalExtra} 🍾)` : ''}
-🪣 *Khali Cans Wapis:* *${totalEmptyReturned} Cans*
-💵 *Month Bill:* *${sym} ${bill.monthCharges.toLocaleString()}*
-🔴 *Kul Wajib-ul-ada (Due):* *${sym} ${bill.netOutstanding.toLocaleString()} /-*
-━━━━━━━━━━━━━━━━━━━━
-${phone ? `📞 Rabta: ${phone}\n` : ''}🙏 Shukriya!`;
+  return `*${biz.toUpperCase()}*
+*Rozana 1 se ${totalDays} Date Ka Hisab Statement*
+*Mahina:* ${bill.monthName}
+*Customer:* *${bill.customerName}*
+----------------------------------------
+*ROZANA BOTTLE DETAILS (1-to-31):*
+${dailyLines || 'Is mahine koi delivery record nahi hua.\n'}----------------------------------------
+*Total Bottles:* *${bill.totalBottles} Bottles* ${totalExtra > 0 ? `(Extra: +${totalExtra})` : ''}
+*Khali Cans Wapis:* *${totalEmptyReturned} Cans*
+*Month Bill:* *${sym} ${bill.monthCharges.toLocaleString()}*
+*Kul Wajib-ul-ada (Due):* *${sym} ${bill.netOutstanding.toLocaleString()} /-*
+----------------------------------------
+${phone ? `Rabta: ${phone}\n` : ''}Shukriya!`;
 }
 
 export function formatSmsBillMessage(bill: CustomerMonthlyBill, settings: Settings): string {
@@ -1107,3 +1091,51 @@ export function generateMonthlyBillPdf(bill: CustomerMonthlyBill, settings: Sett
     URL.revokeObjectURL(url);
   }
 }
+
+// ==================== ROUTE DISPATCH & NOTIFICATIONS ====================
+
+export function getRouteDispatches(): RouteDispatchRecord[] {
+  return getFromStorage<RouteDispatchRecord>(getKey('route_dispatches'), []);
+}
+
+export function saveRouteDispatch(
+  dispatch: Omit<RouteDispatchRecord, 'id' | 'dispatchedAt' | 'status'> & {
+    id?: string;
+    status?: RouteDispatchRecord['status'];
+  }
+): RouteDispatchRecord {
+  const list = getRouteDispatches();
+  const newRecord: RouteDispatchRecord = {
+    id: dispatch.id || uuidv4(),
+    businessId: currentBusinessId || undefined,
+    riderId: dispatch.riderId,
+    riderName: dispatch.riderName,
+    riderPhone: dispatch.riderPhone,
+    areaOrBlock: dispatch.areaOrBlock,
+    customerCount: dispatch.customerCount,
+    bottleCount: dispatch.bottleCount,
+    message: dispatch.message || '',
+    dispatchedAt: new Date().toISOString(),
+    status: dispatch.status || 'active',
+  };
+
+  // Replace any existing active dispatch for this rider so only current route is active
+  const filtered = list.filter(d => !(d.riderId === dispatch.riderId && d.status === 'active'));
+  filtered.unshift(newRecord);
+  saveToStorage(getKey('route_dispatches'), filtered);
+  return newRecord;
+}
+
+export function acknowledgeRouteDispatch(dispatchId: string): void {
+  const list = getRouteDispatches();
+  const updated = list.map(d =>
+    d.id === dispatchId ? { ...d, status: 'acknowledged' as const } : d
+  );
+  saveToStorage(getKey('route_dispatches'), updated);
+}
+
+export function getActiveRouteDispatchForRider(riderId: string): RouteDispatchRecord | null {
+  const list = getRouteDispatches();
+  return list.find(d => d.riderId === riderId && d.status === 'active') || null;
+}
+

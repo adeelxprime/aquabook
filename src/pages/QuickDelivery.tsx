@@ -11,7 +11,7 @@ import {
   Truck, CheckCircle2, Droplets, RotateCcw, MessageSquare, 
   Search, Calendar, Filter, Clock, Plus, Minus, MapPin, 
   Phone, Sparkles, Check, CheckSquare, Square, X, Users,
-  Bike, AlertCircle, RefreshCw, Building2, ShieldCheck
+  Bike, AlertCircle, RefreshCw, Building2, ShieldCheck, Bell, Zap
 } from 'lucide-react';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
@@ -24,12 +24,18 @@ export default function QuickDelivery() {
 
   const { 
     customers, deliveries, addDelivery, updateDelivery, 
-    recordSkippedDelivery, deliveryBoys, settings 
+    recordSkippedDelivery, deliveryBoys, settings,
+    getActiveRouteForRider, acknowledgeRouteDispatch
   } = useApp();
 
   const auth = getAuth();
   const isRiderLoggedIn = auth.userType === 'delivery_boy';
   const loggedInRiderId = auth.deliveryBoyId || '';
+
+  const activeRouteNotification = useMemo(() => {
+    if (!isRiderLoggedIn || !loggedInRiderId) return null;
+    return getActiveRouteForRider(loggedInRiderId);
+  }, [isRiderLoggedIn, loggedInRiderId, getActiveRouteForRider]);
 
   const todayStr = format(new Date(), 'yyyy-MM-dd');
   const [selectedDate, setSelectedDate] = useState(todayStr);
@@ -101,22 +107,52 @@ export default function QuickDelivery() {
 
   // Get distinct areas
   const areas = useMemo(() => {
+    if (isRiderLoggedIn && selectedRider) {
+      const set = new Set<string>();
+      if (selectedRider.assignedAreas) {
+        selectedRider.assignedAreas.forEach(a => a.trim() && set.add(a.trim()));
+      }
+      customers.forEach(c => {
+        if (
+          (c.assignedDeliveryBoyId === loggedInRiderId || (!c.assignedDeliveryBoyId && selectedRider.assignedAreas?.includes(c.area))) &&
+          c.area?.trim()
+        ) {
+          set.add(c.area.trim());
+        }
+      });
+      return Array.from(set);
+    }
     const set = new Set<string>();
     customers.forEach(c => {
       if (c.area && c.area.trim()) set.add(c.area.trim());
     });
     return Array.from(set);
-  }, [customers]);
+  }, [customers, isRiderLoggedIn, selectedRider, loggedInRiderId]);
 
   // Get distinct blocks
   const distinctBlocks = useMemo(() => {
+    if (isRiderLoggedIn && selectedRider) {
+      const set = new Set<string>();
+      if (selectedRider.assignedBlocks) {
+        selectedRider.assignedBlocks.forEach(b => b.trim() && set.add(b.trim()));
+      }
+      customers.forEach(c => {
+        if (
+          (c.assignedDeliveryBoyId === loggedInRiderId || (!c.assignedDeliveryBoyId && selectedRider.assignedBlocks?.includes(c.block))) &&
+          c.block?.trim()
+        ) {
+          set.add(c.block.trim());
+        }
+      });
+      return Array.from(set);
+    }
     const set = new Set<string>();
     customers.forEach(c => {
       if (c.block && c.block.trim()) set.add(c.block.trim());
       else if (c.area && c.area.trim()) set.add(c.area.trim());
     });
     return Array.from(set);
-  }, [customers]);
+  }, [customers, isRiderLoggedIn, selectedRider, loggedInRiderId]);
 
   // Deliveries on selected date
   const todayDeliveriesMap = useMemo(() => {
@@ -139,7 +175,27 @@ export default function QuickDelivery() {
       if (c.status !== 'active') return false;
 
       // Rider filter
-      if (selectedRiderId !== 'all') {
+      if (isRiderLoggedIn) {
+        // Strict Isolation: A logged-in rider (e.g. Ali) can ONLY see their own route and customers
+        const assignedAreas = selectedRider?.assignedAreas || [];
+        const assignedBlocks = selectedRider?.assignedBlocks || [];
+        const hasDeliveredByThisRider = todayDeliveriesMap[c.id]?.deliveryBoyId === loggedInRiderId;
+        const isDirectlyAssigned = c.assignedDeliveryBoyId === loggedInRiderId;
+
+        // If customer is explicitly assigned to another rider, completely exclude
+        if (c.assignedDeliveryBoyId && c.assignedDeliveryBoyId !== loggedInRiderId && !hasDeliveredByThisRider) {
+          return false;
+        }
+
+        // If rider has assigned blocks or areas, customer must match them unless directly assigned or already delivered
+        if (assignedAreas.length > 0 || assignedBlocks.length > 0) {
+          const matchArea = c.area && assignedAreas.includes(c.area);
+          const matchBlock = c.block && assignedBlocks.includes(c.block);
+          if (!matchArea && !matchBlock && !isDirectlyAssigned && !hasDeliveredByThisRider) {
+            return false;
+          }
+        }
+      } else if (selectedRiderId !== 'all') {
         const assignedAreas = selectedRider?.assignedAreas || [];
         const assignedBlocks = selectedRider?.assignedBlocks || [];
         const hasSpecificRestrictions = assignedAreas.length > 0 || assignedBlocks.length > 0;
@@ -567,11 +623,43 @@ export default function QuickDelivery() {
     setExtraModalData(null);
   };
 
-  // Route statistics for selected date
-  const totalOnRoute = customers.filter(c => c.status === 'active').length;
-  const allTodayDeliveries = deliveries.filter(d => d.date === selectedDate);
-  const deliveredList = allTodayDeliveries.filter(d => d.status !== 'skipped');
-  const skippedList = allTodayDeliveries.filter(d => d.status === 'skipped');
+  // Route statistics for selected date (strictly scoped to this rider if logged in or selected)
+  const activeRiderId = isRiderLoggedIn ? loggedInRiderId : (selectedRiderId !== 'all' ? selectedRiderId : null);
+
+  const routeTargetCustomers = useMemo(() => {
+    if (!activeRiderId) {
+      return customers.filter(c => c.status === 'active');
+    }
+    const rider = deliveryBoys.find(b => b.id === activeRiderId);
+    const assignedAreas = rider?.assignedAreas || [];
+    const assignedBlocks = rider?.assignedBlocks || [];
+
+    return customers.filter(c => {
+      if (c.status !== 'active') return false;
+      if (c.assignedDeliveryBoyId === activeRiderId) return true;
+      if (c.assignedDeliveryBoyId && c.assignedDeliveryBoyId !== activeRiderId) return false;
+      if (assignedBlocks.length > 0 && c.block && assignedBlocks.includes(c.block)) return true;
+      if (assignedAreas.length > 0 && c.area && assignedAreas.includes(c.area)) return true;
+      if (assignedBlocks.length === 0 && assignedAreas.length === 0 && !c.assignedDeliveryBoyId) return true;
+      return false;
+    });
+  }, [customers, activeRiderId, deliveryBoys]);
+
+  const routeCustomerIds = useMemo(() => new Set(routeTargetCustomers.map(c => c.id)), [routeTargetCustomers]);
+
+  const routeDeliveries = useMemo(() => {
+    return deliveries.filter(d => {
+      if (d.date !== selectedDate) return false;
+      if (activeRiderId) {
+        return d.deliveryBoyId === activeRiderId || routeCustomerIds.has(d.customerId);
+      }
+      return true;
+    });
+  }, [deliveries, selectedDate, activeRiderId, routeCustomerIds]);
+
+  const totalOnRoute = routeTargetCustomers.length;
+  const deliveredList = routeDeliveries.filter(d => d.status !== 'skipped');
+  const skippedList = routeDeliveries.filter(d => d.status === 'skipped');
   const deliveredCount = deliveredList.length;
   const skippedCount = skippedList.length;
   const totalBottlesToday = deliveredList.reduce((sum, d) => sum + d.quantity, 0);
@@ -599,6 +687,58 @@ export default function QuickDelivery() {
         }
       />
 
+      {/* Rider Urgent Route Alert Banner */}
+      {isRiderLoggedIn && activeRouteNotification && (
+        <div className="bg-gradient-to-r from-sky-600 via-blue-700 to-indigo-700 text-white p-4 rounded-2xl shadow-lg border border-sky-400/40 relative overflow-hidden animate-in fade-in slide-in-from-top-2 duration-300">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center shrink-0 text-white shadow-inner">
+                <Bell className="w-6 h-6 text-amber-300 animate-bounce" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] uppercase tracking-wider bg-amber-400 text-amber-950 font-black px-2.5 py-0.5 rounded-full shadow-2xs">
+                    🚨 Naya Route Order Dispatch
+                  </span>
+                  <span className="text-xs text-sky-100 font-medium">
+                    {activeRouteNotification.dispatchedAt ? format(new Date(activeRouteNotification.dispatchedAt), 'hh:mm a') : 'Today'}
+                  </span>
+                </div>
+                <h3 className="text-base font-black text-white mt-1">
+                  Route: {activeRouteNotification.areaOrBlock} ({activeRouteNotification.customerCount} Customers, ~{activeRouteNotification.bottleCount} Bottles)
+                </h3>
+                {activeRouteNotification.message && (
+                  <p className="text-xs text-sky-100 mt-1 italic font-medium">
+                    "{activeRouteNotification.message}"
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  acknowledgeRouteDispatch(activeRouteNotification.id);
+                  if (activeRouteNotification.areaOrBlock && activeRouteNotification.areaOrBlock !== 'All Assigned Areas') {
+                    if (distinctBlocks.includes(activeRouteNotification.areaOrBlock)) {
+                      setBlockFilter(activeRouteNotification.areaOrBlock);
+                    } else if (areas.includes(activeRouteNotification.areaOrBlock)) {
+                      setAreaFilter(activeRouteNotification.areaOrBlock);
+                    }
+                  }
+                  toast.success('Route shuru kar diya gaya hai! Deliveries complete karein.');
+                }}
+                className="px-4 py-2.5 bg-white hover:bg-emerald-50 text-emerald-800 rounded-xl font-black text-xs shadow-md transition-all flex items-center gap-1.5 active:scale-95"
+              >
+                <Check className="w-4 h-4 text-emerald-600" />
+                <span>Start Route / Samjh Gaya</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Rider / Mode Switcher Bar */}
       <Card className="p-3.5 bg-gradient-to-r from-sky-50 via-white to-blue-50 border-sky-100">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -618,40 +758,54 @@ export default function QuickDelivery() {
                 )}
               </div>
               <h4 className="text-sm font-bold text-gray-900">
-                {selectedRiderId === 'all' ? 'Owner Master Monitor (All Riders & Routes)' : `${selectedRider?.name}'s Route`}
+                {isRiderLoggedIn
+                  ? `🛵 ${selectedRider?.name || 'Rider'}'s Delivery Route`
+                  : (selectedRiderId === 'all' ? 'Owner Master Monitor (All Riders & Routes)' : `${selectedRider?.name}'s Route`)}
               </h4>
             </div>
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs font-bold text-gray-500">Rider / Route:</span>
-            <select
-              value={selectedRiderId}
-              onChange={e => {
-                const val = e.target.value;
-                setSelectedRiderId(val);
-                if (val !== 'all') {
-                  const r = deliveryBoys.find(b => b.id === val);
-                  if (r?.assignedBlocks && r.assignedBlocks.length > 0) {
-                    setBlockFilter(r.assignedBlocks[0]);
-                  }
-                  if (r?.assignedAreas && r.assignedAreas.length > 0) {
-                    setAreaFilter(r.assignedAreas[0]);
-                  }
-                }
-              }}
-              className="px-3 py-1.5 bg-white border border-gray-200 rounded-xl text-xs font-bold text-gray-800 focus:outline-none shadow-2xs"
-            >
-              <option value="all">👁️ All Riders (Owner Master View)</option>
-              {deliveryBoys.map(boy => {
-                const blockTag = boy.assignedBlocks?.length ? ` [${boy.assignedBlocks.join(', ')}]` : '';
-                return (
-                  <option key={boy.id} value={boy.id}>
-                    🛵 {boy.name}{blockTag}
-                  </option>
-                );
-              })}
-            </select>
+            {isRiderLoggedIn ? (
+              <div className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-emerald-300 text-emerald-800 rounded-xl text-xs font-bold shadow-2xs">
+                <Bike className="w-4 h-4 text-emerald-600" />
+                <span>Rider: {selectedRider?.name || auth.name}</span>
+                {selectedRider?.vehicleNumber && (
+                  <span className="text-[10px] text-emerald-600 font-medium">({selectedRider.vehicleNumber})</span>
+                )}
+              </div>
+            ) : (
+              <>
+                <span className="text-xs font-bold text-gray-500">Rider / Route:</span>
+                <select
+                  value={selectedRiderId}
+                  onChange={e => {
+                    const val = e.target.value;
+                    setSelectedRiderId(val);
+                    if (val !== 'all') {
+                      const r = deliveryBoys.find(b => b.id === val);
+                      if (r?.assignedBlocks && r.assignedBlocks.length > 0) {
+                        setBlockFilter(r.assignedBlocks[0]);
+                      }
+                      if (r?.assignedAreas && r.assignedAreas.length > 0) {
+                        setAreaFilter(r.assignedAreas[0]);
+                      }
+                    }
+                  }}
+                  className="px-3 py-1.5 bg-white border border-gray-200 rounded-xl text-xs font-bold text-gray-800 focus:outline-none shadow-2xs"
+                >
+                  <option value="all">👁️ All Riders (Owner Master View)</option>
+                  {deliveryBoys.map(boy => {
+                    const blockTag = boy.assignedBlocks?.length ? ` [${boy.assignedBlocks.join(', ')}]` : '';
+                    return (
+                      <option key={boy.id} value={boy.id}>
+                        🛵 {boy.name}{blockTag}
+                      </option>
+                    );
+                  })}
+                </select>
+              </>
+            )}
           </div>
         </div>
 

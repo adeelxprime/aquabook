@@ -1,5 +1,5 @@
 import { getSupabase, isSupabaseConfigured } from './supabaseClient';
-import type { Customer, Delivery, Payment, DeliveryBoy } from '../types';
+import type { Customer, Delivery, Payment, DeliveryBoy, RouteDispatchRecord } from '../types';
 import type { Business } from '../types/admin';
 
 // ==========================================
@@ -565,6 +565,53 @@ export async function deleteDeliveryBoyFromSupabase(businessId: string, boyId: s
 }
 
 // ==========================================
+// ROUTE DISPATCHES (RIDER NOTIFICATIONS)
+// ==========================================
+export async function fetchRouteDispatchesFromSupabase(businessId: string): Promise<RouteDispatchRecord[] | null> {
+  const client = getSupabase();
+  if (!client || !isSupabaseConfigured()) return null;
+
+  try {
+    const res = await client
+      .from('settings')
+      .select('*')
+      .eq('id', `dispatches_${businessId}`)
+      .maybeSingle();
+
+    if (!res.error && res.data && res.data.business_address) {
+      try {
+        const parsed = JSON.parse(res.data.business_address);
+        if (Array.isArray(parsed)) return parsed;
+      } catch {}
+    }
+    return [];
+  } catch (err) {
+    console.warn('fetchRouteDispatchesFromSupabase error:', err);
+    return null;
+  }
+}
+
+export async function upsertRouteDispatchesPayloadToSupabase(businessId: string, dispatches: RouteDispatchRecord[]): Promise<boolean> {
+  const client = getSupabase();
+  if (!client || !isSupabaseConfigured()) return false;
+
+  try {
+    const payloadStr = JSON.stringify(dispatches);
+    await client.from('settings').upsert({
+      id: `dispatches_${businessId}`,
+      business_id: businessId,
+      business_name: 'AQUABOOK ROUTE DISPATCHES',
+      business_address: payloadStr,
+      updated_at: new Date().toISOString(),
+    });
+    return true;
+  } catch (err) {
+    console.warn('upsertRouteDispatchesPayloadToSupabase error:', err);
+    return false;
+  }
+}
+
+// ==========================================
 // 1-CLICK CLOUD PULL (DOWNLOAD FROM SUPABASE TO LOCAL)
 // ==========================================
 export async function pullCloudDataToLocal(businessId: string): Promise<{
@@ -582,11 +629,12 @@ export async function pullCloudDataToLocal(businessId: string): Promise<{
   }
 
   try {
-    const [cloudCust, cloudDel, cloudPay, cloudBoys] = await Promise.all([
+    const [cloudCust, cloudDel, cloudPay, cloudBoys, cloudDispatches] = await Promise.all([
       fetchCustomersFromSupabase(businessId),
       fetchDeliveriesFromSupabase(businessId),
       fetchPaymentsFromSupabase(businessId),
       fetchDeliveryBoysFromSupabase(businessId),
+      fetchRouteDispatchesFromSupabase(businessId),
     ]);
 
     const scope = `_${businessId}`;
@@ -652,6 +700,17 @@ export async function pullCloudDataToLocal(businessId: string): Promise<{
       boyCount = localBoysStr ? JSON.parse(localBoysStr).length : 0;
     }
 
+    if (cloudDispatches && cloudDispatches.length > 0) {
+      const localDispStr = localStorage.getItem(`aquabook_route_dispatches${scope}`) || localStorage.getItem(`aquabook_route_dispatches_${businessId}`);
+      const localDispatches: RouteDispatchRecord[] = localDispStr ? JSON.parse(localDispStr) : [];
+      const dispMap = new Map<string, RouteDispatchRecord>();
+      localDispatches.forEach(d => dispMap.set(d.id, d));
+      cloudDispatches.forEach(d => dispMap.set(d.id, d));
+      const mergedDispatches = Array.from(dispMap.values());
+      localStorage.setItem(`aquabook_route_dispatches${scope}`, JSON.stringify(mergedDispatches));
+      localStorage.setItem(`aquabook_route_dispatches_${businessId}`, JSON.stringify(mergedDispatches));
+    }
+
     return {
       success: true,
       message: `Sync kamyab! Cloud se ${cloudCust?.length || 0} Customers, ${cloudDel?.length || 0} Deliveries, ${cloudPay?.length || 0} Payments, aur ${cloudBoys?.length || 0} Delivery Boys load ho gaye.`,
@@ -685,11 +744,13 @@ export async function syncLocalDataToSupabase(businessId: string): Promise<{
     const deliveriesStr = localStorage.getItem(`aquabook_deliveries${scope}`) || '[]';
     const paymentsStr = localStorage.getItem(`aquabook_payments${scope}`) || '[]';
     const deliveryBoysStr = localStorage.getItem(`aquabook_delivery_boys${scope}`) || localStorage.getItem(`aquabook_delivery_boys_${businessId}`) || '[]';
+    const dispatchesStr = localStorage.getItem(`aquabook_route_dispatches${scope}`) || localStorage.getItem(`aquabook_route_dispatches_${businessId}`) || '[]';
 
     const localCustomers: Customer[] = JSON.parse(customersStr);
     const localDeliveries: Delivery[] = JSON.parse(deliveriesStr);
     const localPayments: Payment[] = JSON.parse(paymentsStr);
     const localDeliveryBoys: DeliveryBoy[] = JSON.parse(deliveryBoysStr);
+    const localDispatches: RouteDispatchRecord[] = JSON.parse(dispatchesStr);
 
     // 1. Sync Customers
     for (const c of localCustomers) {
@@ -709,6 +770,11 @@ export async function syncLocalDataToSupabase(businessId: string): Promise<{
     // 4. Sync Delivery Boys
     if (localDeliveryBoys.length > 0) {
       await upsertDeliveryBoysPayloadToSupabase(businessId, localDeliveryBoys);
+    }
+
+    // 5. Sync Route Dispatches
+    if (localDispatches.length > 0) {
+      await upsertRouteDispatchesPayloadToSupabase(businessId, localDispatches);
     }
 
     return {
