@@ -2,7 +2,8 @@ import { v4 as uuidv4 } from 'uuid';
 import type { AdminUser, Business, SubscriptionPayment, AdminDashboardStats, AuthState } from '../types/admin';
 import type { DeliveryBoy } from '../types';
 import { setCurrentBusiness } from './dataService';
-import { fetchBusinessesFromSupabase, upsertBusinessToSupabase } from './supabaseService';
+import { fetchBusinessesFromSupabase, upsertBusinessToSupabase, fetchDeliveryBoysFromSupabase, pullCloudDataToLocal } from './supabaseService';
+import { isSupabaseConfigured } from './supabaseClient';
 
 const KEYS = {
   ADMIN: 'aquabook_admin',
@@ -149,12 +150,12 @@ export async function loginBusiness(username: string, password: string): Promise
   return { success: true, message: 'Login successful', business: updated };
 }
 
-export function loginDeliveryBoy(usernameOrPhone: string, passwordOrPin: string): { success: boolean; message: string; deliveryBoy?: DeliveryBoy; business?: Business } {
+export async function loginDeliveryBoy(usernameOrPhone: string, passwordOrPin: string): Promise<{ success: boolean; message: string; deliveryBoy?: DeliveryBoy; business?: Business }> {
   const cleanInput = usernameOrPhone.trim().toLowerCase();
   const cleanPass = passwordOrPin.trim();
 
-  // 1. Search through all businesses' delivery boys
-  const businesses = getBusinesses();
+  // 1. Search through all businesses' delivery boys in local storage
+  let businesses = getBusinesses();
   
   for (const biz of businesses) {
     const rawBoys = localStorage.getItem(`aquabook_delivery_boys_${biz.id}`);
@@ -223,6 +224,59 @@ export function loginDeliveryBoy(usernameOrPhone: string, passwordOrPin: string)
       }
     }
   } catch {}
+
+  // 3. Fallback: If not found on this device (e.g. rider logging in on mobile for first time), query Supabase Cloud!
+  try {
+    if (isSupabaseConfigured()) {
+      let cloudBusinesses = await fetchBusinessesFromSupabase();
+      if (!cloudBusinesses || cloudBusinesses.length === 0) {
+        cloudBusinesses = businesses;
+      }
+
+      for (const biz of cloudBusinesses) {
+        const cloudBoys = await fetchDeliveryBoysFromSupabase(biz.id);
+        if (cloudBoys && cloudBoys.length > 0) {
+          // Cache in local storage for fast subsequent loads
+          localStorage.setItem(`aquabook_delivery_boys_${biz.id}`, JSON.stringify(cloudBoys));
+
+          const match = cloudBoys.find(b => {
+            const matchesUser = (b.username && b.username.toLowerCase() === cleanInput) ||
+                                (b.phone && b.phone.replace(/[^0-9]/g, '') === cleanInput.replace(/[^0-9]/g, '')) ||
+                                (b.name && b.name.toLowerCase() === cleanInput);
+            const matchesPass = (b.password && b.password === cleanPass) ||
+                                (!b.password && cleanPass === '1234');
+            return matchesUser && matchesPass;
+          });
+
+          if (match) {
+            if (match.status !== 'active') {
+              return { success: false, message: 'Yeh delivery boy account inactive (off duty) hai. Owner se rabta karein.' };
+            }
+            if (biz.isActive === false || biz.subscription?.status === 'inactive' || biz.subscription?.status === 'expired') {
+              return { success: false, message: 'Water plant subscription inactive hai. Plant owner se rabta karein.' };
+            }
+
+            setAuth({
+              isAuthenticated: true,
+              userType: 'delivery_boy',
+              userId: match.id,
+              businessId: biz.id,
+              deliveryBoyId: match.id,
+              deliveryBoyName: match.name,
+            });
+            setCurrentBusiness(biz.id);
+
+            // Pull cloud customers and deliveries so mobile rider has their full route immediately
+            await pullCloudDataToLocal(biz.id);
+
+            return { success: true, message: `Welcome ${match.name}!`, deliveryBoy: match, business: biz };
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('loginDeliveryBoy cloud fallback error:', err);
+  }
 
   return { 
     success: false, 

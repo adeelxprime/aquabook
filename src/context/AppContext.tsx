@@ -6,6 +6,7 @@ import {
   upsertCustomerToSupabase, deleteCustomerFromSupabase,
   upsertDeliveryToSupabase, deleteDeliveryFromSupabase,
   upsertPaymentToSupabase, deletePaymentFromSupabase,
+  upsertDeliveryBoyToSupabase, deleteDeliveryBoyFromSupabase,
   pullCloudDataToLocal
 } from '../services/supabaseService';
 import { isSupabaseConfigured } from '../services/supabaseClient';
@@ -252,18 +253,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const addDeliveryBoyAction = useCallback((boy: Omit<DeliveryBoy, 'id' | 'createdAt' | 'updatedAt'>) => {
     const result = db.addDeliveryBoy(boy);
+    const currentAuth = getAuth();
+    if (currentAuth.businessId && isSupabaseConfigured()) {
+      upsertDeliveryBoyToSupabase(currentAuth.businessId, result).catch(() => {});
+    }
     refreshAll();
     return result;
   }, [refreshAll]);
 
   const updateDeliveryBoyAction = useCallback((id: string, updates: Partial<DeliveryBoy>) => {
     const result = db.updateDeliveryBoy(id, updates);
+    const currentAuth = getAuth();
+    if (result && currentAuth.businessId && isSupabaseConfigured()) {
+      upsertDeliveryBoyToSupabase(currentAuth.businessId, result).catch(() => {});
+    }
     refreshAll();
     return result;
   }, [refreshAll]);
 
   const deleteDeliveryBoyAction = useCallback((id: string) => {
     const result = db.deleteDeliveryBoy(id);
+    const currentAuth = getAuth();
+    if (result && currentAuth.businessId && isSupabaseConfigured()) {
+      deleteDeliveryBoyFromSupabase(currentAuth.businessId, id).catch(() => {});
+    }
     refreshAll();
     return result;
   }, [refreshAll]);

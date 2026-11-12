@@ -8,7 +8,7 @@ import type { DeliveryBoy } from '../types';
 import { 
   Users, UserPlus, Phone, Bike, Truck, Check, X, Clock, 
   MessageSquare, Edit, Trash2, MapPin, Target, Droplets, 
-  DollarSign, AlertCircle, ExternalLink, ShieldCheck, Building2
+  DollarSign, AlertCircle, ExternalLink, ShieldCheck, Building2, RefreshCw
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
@@ -18,7 +18,7 @@ export default function DeliveryBoys() {
   const navigate = useNavigate();
   const { 
     deliveryBoys, addDeliveryBoy, updateDeliveryBoy, deleteDeliveryBoy, 
-    customers, deliveries, settings 
+    customers, deliveries, settings, syncFromCloud, isSyncing
   } = useApp();
 
   const [search, setSearch] = useState('');
@@ -293,9 +293,19 @@ export default function DeliveryBoys() {
         title="Delivery Boys & Route Staff"
         subtitle="Manage water delivery riders, assign route areas & monitor real-time deliveries (Tick/Cross)"
         action={
-          <Button onClick={handleOpenAdd} icon={<UserPlus className="w-4 h-4" />}>
-            Add Delivery Boy
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button 
+              variant="secondary"
+              onClick={() => syncFromCloud(true)}
+              disabled={isSyncing}
+              icon={<RefreshCw className={`w-4 h-4 text-sky-600 ${isSyncing ? 'animate-spin' : ''}`} />}
+            >
+              {isSyncing ? 'Syncing...' : 'Sync Cloud'}
+            </Button>
+            <Button onClick={handleOpenAdd} icon={<UserPlus className="w-4 h-4" />}>
+              Add Delivery Boy
+            </Button>
+          </div>
         }
       />
 

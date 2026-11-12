@@ -29,7 +29,7 @@ export default function Login() {
     setLoading(true);
     try {
       if (loginRole === 'delivery_boy') {
-        const result = loginDeliveryBoy(username, password);
+        const result = await loginDeliveryBoy(username, password);
         if (result.success) {
           toast.success(`Welcome Rider ${result.deliveryBoy?.name || 'Rider'}! Route shuru karein 🚴`);
           navigate('/quick-delivery');
