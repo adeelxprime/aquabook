@@ -68,8 +68,9 @@ export default function DeliveryBoys() {
     return Array.from(set);
   }, [customers]);
 
-  // Route Dispatch & Notification State
+  // Route Dispatch & Notification State (Owner full control: Day-Wise vs Block-Wise vs Both)
   const currentDayName = format(new Date(), 'EEE');
+  const [routeMode, setRouteMode] = useState<'day' | 'block' | 'both'>('day');
   const [selectedDispatchDay, setSelectedDispatchDay] = useState<string>(currentDayName);
   const [dispatchBoy, setDispatchBoy] = useState<DeliveryBoy | null>(null);
   const [selectedRouteTarget, setSelectedRouteTarget] = useState<string>('all_assigned');
@@ -77,14 +78,14 @@ export default function DeliveryBoys() {
 
   const handleOpenDispatch = (boy: DeliveryBoy) => {
     setDispatchBoy(boy);
+    setRouteMode('day'); // Default to Day-Wise route mode per user preference
     setSelectedDispatchDay(currentDayName);
-    const defaultTarget = boy.assignedBlocks?.[0] || boy.assignedAreas?.[0] || 'all_assigned';
-    setSelectedRouteTarget(defaultTarget);
+    setSelectedRouteTarget('all_assigned');
     setCustomRouteNote('Jaldi se water deliver kar ke register update karein!');
   };
 
   const dispatchRouteMetrics = useMemo(() => {
-    if (!dispatchBoy) return { count: 0, bottles: 0, routeLabel: '' };
+    if (!dispatchBoy) return { count: 0, bottles: 0, routeLabel: '', matchedCustomers: [] };
 
     const isAllAssigned = selectedRouteTarget === 'all_assigned';
     const assignedBlocks = dispatchBoy.assignedBlocks || [];
@@ -93,34 +94,76 @@ export default function DeliveryBoys() {
     const matchedCustomers = customers.filter(c => {
       if (c.status !== 'active') return false;
 
-      // Strict Day schedule filter
-      const matchesDay = selectedDispatchDay === 'all'
-        ? true
-        : Boolean(c.deliveryDays && c.deliveryDays.includes(selectedDispatchDay));
-      if (!matchesDay) return false;
-
-      if (isAllAssigned) {
-        if (c.assignedDeliveryBoyId === dispatchBoy.id) return true;
-        if (c.assignedDeliveryBoyId && c.assignedDeliveryBoyId !== dispatchBoy.id) return false;
-        if (c.block && assignedBlocks.includes(c.block)) return true;
-        if (c.area && assignedAreas.includes(c.area)) return true;
+      // Rider territory / assignment check
+      if (c.assignedDeliveryBoyId && c.assignedDeliveryBoyId !== dispatchBoy.id) {
         return false;
-      } else {
-        const matchesTarget = (c.block && c.block === selectedRouteTarget) || (c.area && c.area === selectedRouteTarget);
-        if (!matchesTarget) return false;
-        if (c.assignedDeliveryBoyId && c.assignedDeliveryBoyId !== dispatchBoy.id) return false;
-        return true;
       }
+
+      // 1. Day-Wise Mode: Filter strictly by selected day schedule
+      if (routeMode === 'day') {
+        const matchesDay = selectedDispatchDay === 'all'
+          ? true
+          : Boolean(c.deliveryDays && c.deliveryDays.includes(selectedDispatchDay));
+        if (!matchesDay) return false;
+
+        if (c.assignedDeliveryBoyId === dispatchBoy.id) return true;
+        if (assignedBlocks.length > 0 && c.block && assignedBlocks.includes(c.block)) return true;
+        if (assignedAreas.length > 0 && c.area && assignedAreas.includes(c.area)) return true;
+        if (assignedBlocks.length === 0 && assignedAreas.length === 0 && !c.assignedDeliveryBoyId) return true;
+        return false;
+      }
+
+      // 2. Block-Wise Mode: Filter strictly by selected block or area
+      if (routeMode === 'block') {
+        if (isAllAssigned) {
+          if (c.assignedDeliveryBoyId === dispatchBoy.id) return true;
+          if (assignedBlocks.length > 0 && c.block && assignedBlocks.includes(c.block)) return true;
+          if (assignedAreas.length > 0 && c.area && assignedAreas.includes(c.area)) return true;
+          if (assignedBlocks.length === 0 && assignedAreas.length === 0 && !c.assignedDeliveryBoyId) return true;
+          return false;
+        } else {
+          return Boolean((c.block && c.block === selectedRouteTarget) || (c.area && c.area === selectedRouteTarget));
+        }
+      }
+
+      // 3. Both Mode: Combine Day schedule + Block/Area
+      if (routeMode === 'both') {
+        const matchesDay = selectedDispatchDay === 'all'
+          ? true
+          : Boolean(c.deliveryDays && c.deliveryDays.includes(selectedDispatchDay));
+        if (!matchesDay) return false;
+
+        if (isAllAssigned) {
+          if (c.assignedDeliveryBoyId === dispatchBoy.id) return true;
+          if (assignedBlocks.length > 0 && c.block && assignedBlocks.includes(c.block)) return true;
+          if (assignedAreas.length > 0 && c.area && assignedAreas.includes(c.area)) return true;
+          if (assignedBlocks.length === 0 && assignedAreas.length === 0 && !c.assignedDeliveryBoyId) return true;
+          return false;
+        } else {
+          return Boolean((c.block && c.block === selectedRouteTarget) || (c.area && c.area === selectedRouteTarget));
+        }
+      }
+
+      return false;
     });
 
     const count = matchedCustomers.length;
     const bottles = matchedCustomers.reduce((sum, c) => sum + (c.quantity || 1), 0);
-    const routeLabel = isAllAssigned
-      ? (assignedBlocks.join(', ') || assignedAreas.join(', ') || 'All Assigned Areas')
-      : selectedRouteTarget;
 
-    return { count, bottles, routeLabel };
-  }, [dispatchBoy, selectedRouteTarget, customers, selectedDispatchDay]);
+    let routeLabel = '';
+    if (routeMode === 'day') {
+      routeLabel = selectedDispatchDay === 'all' ? 'Sab Din Schedule' : `${selectedDispatchDay} Delivery Route`;
+    } else if (routeMode === 'block') {
+      routeLabel = isAllAssigned
+        ? (assignedBlocks.join(', ') || assignedAreas.join(', ') || 'All Routes')
+        : selectedRouteTarget;
+    } else {
+      const targetName = isAllAssigned ? 'All Routes' : selectedRouteTarget;
+      routeLabel = `${targetName} [${selectedDispatchDay}]`;
+    }
+
+    return { count, bottles, routeLabel, matchedCustomers };
+  }, [dispatchBoy, selectedRouteTarget, customers, selectedDispatchDay, routeMode]);
 
   const handleSendWhatsAppNotification = () => {
     if (!dispatchBoy) return;
@@ -130,17 +173,18 @@ export default function DeliveryBoys() {
       riderId: dispatchBoy.id,
       riderName: dispatchBoy.name,
       riderPhone: dispatchBoy.phone,
-      areaOrBlock: `${routeLabel || 'Assigned Route'} (${selectedDispatchDay === 'all' ? 'All Days' : selectedDispatchDay})`,
+      areaOrBlock: routeLabel || 'Route',
       customerCount: count,
       bottleCount: bottles,
       message: customRouteNote.trim(),
+      dispatchMode: routeMode,
+      dispatchDay: selectedDispatchDay,
     });
 
     const cleanPhone = dispatchBoy.phone.replace(/[^0-9]/g, '');
     const targetPhone = cleanPhone.startsWith('0') ? '92' + cleanPhone.substring(1) : cleanPhone;
 
-    const dayText = selectedDispatchDay === 'all' ? '' : ` [${selectedDispatchDay} Schedule]`;
-    const textMsg = `Salam ${dispatchBoy.name} bhai! Aapka route "${routeLabel || 'Today Route'}"${dayText} assign ho gaya hai (${count} Customers, ~${bottles} Bottles).${customRouteNote.trim() ? ' Hidayat: ' + customRouteNote.trim() + '.' : ''} Apne mobile pe login kar ke deliver karein. - AquaBook`;
+    const textMsg = `Salam ${dispatchBoy.name} bhai! Aapka route "${routeLabel || 'Today Route'}" assign ho gaya hai (${count} Customers, ~${bottles} Bottles).${customRouteNote.trim() ? ' Hidayat: ' + customRouteNote.trim() + '.' : ''} Apne mobile pe login kar ke deliver karein. - AquaBook`;
 
     window.open(`https://wa.me/${targetPhone}?text=${encodeURIComponent(textMsg)}`, '_blank');
     toast.success(`✅ ${dispatchBoy.name} ko WhatsApp route alert bhej diya gaya hai!`);
@@ -155,14 +199,15 @@ export default function DeliveryBoys() {
       riderId: dispatchBoy.id,
       riderName: dispatchBoy.name,
       riderPhone: dispatchBoy.phone,
-      areaOrBlock: `${routeLabel || 'Assigned Route'} (${selectedDispatchDay === 'all' ? 'All Days' : selectedDispatchDay})`,
+      areaOrBlock: routeLabel || 'Route',
       customerCount: count,
       bottleCount: bottles,
       message: customRouteNote.trim(),
+      dispatchMode: routeMode,
+      dispatchDay: selectedDispatchDay,
     });
 
-    const dayText = selectedDispatchDay === 'all' ? '' : ` [${selectedDispatchDay} Schedule]`;
-    const textMsg = `Salam ${dispatchBoy.name}! Route "${routeLabel}"${dayText} assign ho gaya (${count} Customers, ~${bottles} Bottles).${customRouteNote.trim() ? ' ' + customRouteNote.trim() : ''} Login kar ke delivery shuru karein. - AquaBook`;
+    const textMsg = `Salam ${dispatchBoy.name}! Route "${routeLabel}" assign ho gaya (${count} Customers, ~${bottles} Bottles).${customRouteNote.trim() ? ' ' + customRouteNote.trim() : ''} Login kar ke delivery shuru karein. - AquaBook`;
 
     window.open(`sms:${dispatchBoy.phone}?body=${encodeURIComponent(textMsg)}`, '_self');
     toast.success(`✅ ${dispatchBoy.name} ke liye SMS route alert open ho gaya!`);
@@ -177,10 +222,12 @@ export default function DeliveryBoys() {
       riderId: dispatchBoy.id,
       riderName: dispatchBoy.name,
       riderPhone: dispatchBoy.phone,
-      areaOrBlock: `${routeLabel || 'Assigned Route'} (${selectedDispatchDay === 'all' ? 'All Days' : selectedDispatchDay})`,
+      areaOrBlock: routeLabel || 'Route',
       customerCount: count,
       bottleCount: bottles,
       message: customRouteNote.trim(),
+      dispatchMode: routeMode,
+      dispatchDay: selectedDispatchDay,
     });
 
     toast.success(`✅ Route notify ho gaya! ${dispatchBoy.name} ke mobile login par alert show hoga.`);
@@ -1020,99 +1067,150 @@ export default function DeliveryBoys() {
               </div>
             </div>
 
-            {/* Select Target Route (Area / Block) */}
+            {/* Route Assign Mode Selection (Owner Ki Choice: Day-Wise vs Block-Wise vs Both) */}
             <div>
-              <label className="block text-xs font-bold text-gray-700 mb-1.5">
-                Konse Area ya Block me deliver karne bhejna hai?
+              <label className="block text-xs font-bold text-gray-700 mb-1.5 flex items-center justify-between">
+                <span>Route Ka Tariqa (Owner Ki Marzi):</span>
+                <span className="text-[10px] text-sky-600 font-semibold uppercase">
+                  {routeMode === 'day' ? '📅 Day-Wise Active' : routeMode === 'block' ? '🏢 Block-Wise Active' : '⚡ Day + Block Active'}
+                </span>
               </label>
-              <select
-                value={selectedRouteTarget}
-                onChange={e => setSelectedRouteTarget(e.target.value)}
-                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-xs font-bold text-gray-800 focus:outline-none focus:ring-2 focus:ring-sky-500 shadow-2xs"
-              >
-                <option value="all_assigned">
-                  📍 Sab Assigned Areas & Blocks ({dispatchBoy.assignedBlocks?.join(', ') || dispatchBoy.assignedAreas?.join(', ') || 'All Routes'})
-                </option>
-                
-                {/* Rider's specifically assigned blocks */}
-                {dispatchBoy.assignedBlocks && dispatchBoy.assignedBlocks.length > 0 && (
-                  <optgroup label="🏢 Rider's Assigned Blocks">
-                    {dispatchBoy.assignedBlocks.map(b => (
-                      <option key={`blk_${b}`} value={b}>🏢 Block: {b}</option>
-                    ))}
-                  </optgroup>
-                )}
-
-                {/* Rider's specifically assigned areas */}
-                {dispatchBoy.assignedAreas && dispatchBoy.assignedAreas.length > 0 && (
-                  <optgroup label="📍 Rider's Assigned Areas">
-                    {dispatchBoy.assignedAreas.map(a => (
-                      <option key={`area_${a}`} value={a}>📍 Area: {a}</option>
-                    ))}
-                  </optgroup>
-                )}
-
-                {/* Other Available Blocks in system */}
-                <optgroup label="🌐 Other Plant Blocks">
-                  {availableBlocks
-                    .filter(b => !dispatchBoy.assignedBlocks?.includes(b))
-                    .map(b => (
-                      <option key={`other_blk_${b}`} value={b}>🏢 Block: {b}</option>
-                    ))}
-                </optgroup>
-
-                {/* Other Available Areas in system */}
-                <optgroup label="🌐 Other Plant Areas">
-                  {availableAreas
-                    .filter(a => !dispatchBoy.assignedAreas?.includes(a))
-                    .map(a => (
-                      <option key={`other_area_${a}`} value={a}>📍 Area: {a}</option>
-                    ))}
-                </optgroup>
-              </select>
-            </div>
-
-            {/* Day Schedule Selection (Mon - Sun) */}
-            <div>
-              <label className="block text-xs font-bold text-gray-700 mb-1.5 flex items-center gap-1.5">
-                <Calendar className="w-3.5 h-3.5 text-sky-600" />
-                <span>Delivery Din (Day Schedule Filter):</span>
-              </label>
-              <div className="grid grid-cols-4 sm:grid-cols-8 gap-1.5">
-                {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => (
-                  <button
-                    key={day}
-                    type="button"
-                    onClick={() => setSelectedDispatchDay(day)}
-                    className={`py-1.5 px-1 rounded-xl text-xs font-bold transition-all text-center ${
-                      selectedDispatchDay === day
-                        ? 'bg-sky-600 text-white shadow-xs'
-                        : currentDayName === day
-                        ? 'bg-sky-50 text-sky-800 border border-sky-300 hover:bg-sky-100'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    {day}
-                  </button>
-                ))}
+              <div className="grid grid-cols-3 gap-1.5 p-1 bg-gray-100 rounded-2xl">
                 <button
                   type="button"
-                  onClick={() => setSelectedDispatchDay('all')}
-                  className={`py-1.5 px-1 rounded-xl text-xs font-bold transition-all text-center ${
-                    selectedDispatchDay === 'all'
+                  onClick={() => setRouteMode('day')}
+                  className={`py-2 px-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    routeMode === 'day'
                       ? 'bg-sky-600 text-white shadow-xs'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      : 'text-gray-600 hover:text-gray-900'
                   }`}
                 >
-                  All
+                  <Calendar className="w-3.5 h-3.5" />
+                  <span>Day-Wise (Din)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setRouteMode('block')}
+                  className={`py-2 px-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    routeMode === 'block'
+                      ? 'bg-sky-600 text-white shadow-xs'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  <Building2 className="w-3.5 h-3.5" />
+                  <span>Block-Wise</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setRouteMode('both')}
+                  className={`py-2 px-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    routeMode === 'both'
+                      ? 'bg-sky-600 text-white shadow-xs'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  <MapPin className="w-3.5 h-3.5" />
+                  <span>Day + Block</span>
                 </button>
               </div>
-              <p className="text-[11px] text-gray-500 mt-1">
-                {selectedDispatchDay === 'all'
-                  ? 'Sab dinon ke customers count honge.'
-                  : `Sirf wahi customers samne aayenge jinki delivery ${selectedDispatchDay} ko schedule hai.`}
-              </p>
             </div>
+
+            {/* If Day-Wise or Both: Show Day Schedule Selection */}
+            {(routeMode === 'day' || routeMode === 'both') && (
+              <div className="p-3 bg-sky-50/60 border border-sky-100 rounded-2xl animate-in fade-in duration-200">
+                <label className="block text-xs font-bold text-sky-900 mb-1.5 flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-sky-600" />
+                  <span>Delivery Din Select Karein:</span>
+                </label>
+                <div className="grid grid-cols-4 sm:grid-cols-8 gap-1.5">
+                  {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => (
+                    <button
+                      key={day}
+                      type="button"
+                      onClick={() => setSelectedDispatchDay(day)}
+                      className={`py-1.5 px-1 rounded-xl text-xs font-bold transition-all text-center cursor-pointer ${
+                        selectedDispatchDay === day
+                          ? 'bg-sky-600 text-white shadow-xs'
+                          : currentDayName === day
+                          ? 'bg-white text-sky-800 border border-sky-300 hover:bg-sky-100'
+                          : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-100'
+                      }`}
+                    >
+                      {day}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDispatchDay('all')}
+                    className={`py-1.5 px-1 rounded-xl text-xs font-bold transition-all text-center cursor-pointer ${
+                      selectedDispatchDay === 'all'
+                        ? 'bg-sky-600 text-white shadow-xs'
+                        : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-100'
+                    }`}
+                  >
+                    Sab
+                  </button>
+                </div>
+                <p className="text-[11px] text-sky-700 mt-1.5 font-medium">
+                  {selectedDispatchDay === 'all'
+                    ? 'Sab dinon ke scheduled customers show honge.'
+                    : `Sirf wahi customers aayenge jinka schedule ${selectedDispatchDay} ka hai.`}
+                </p>
+              </div>
+            )}
+
+            {/* If Block-Wise or Both: Show Area / Block Dropdown */}
+            {(routeMode === 'block' || routeMode === 'both') && (
+              <div className="p-3 bg-gray-50 border border-gray-200 rounded-2xl animate-in fade-in duration-200">
+                <label className="block text-xs font-bold text-gray-800 mb-1.5 flex items-center gap-1.5">
+                  <Building2 className="w-3.5 h-3.5 text-sky-600" />
+                  <span>Konse Area ya Block me deliver karne bhejna hai?</span>
+                </label>
+                <select
+                  value={selectedRouteTarget}
+                  onChange={e => setSelectedRouteTarget(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-xs font-bold text-gray-800 focus:outline-none focus:ring-2 focus:ring-sky-500 shadow-2xs"
+                >
+                  <option value="all_assigned">
+                    📍 Sab Assigned Areas & Blocks ({dispatchBoy.assignedBlocks?.join(', ') || dispatchBoy.assignedAreas?.join(', ') || 'All Routes'})
+                  </option>
+                  
+                  {dispatchBoy.assignedBlocks && dispatchBoy.assignedBlocks.length > 0 && (
+                    <optgroup label="🏢 Rider's Assigned Blocks">
+                      {dispatchBoy.assignedBlocks.map(b => (
+                        <option key={`blk_${b}`} value={b}>🏢 Block: {b}</option>
+                      ))}
+                    </optgroup>
+                  )}
+
+                  {dispatchBoy.assignedAreas && dispatchBoy.assignedAreas.length > 0 && (
+                    <optgroup label="📍 Rider's Assigned Areas">
+                      {dispatchBoy.assignedAreas.map(a => (
+                        <option key={`area_${a}`} value={a}>📍 Area: {a}</option>
+                      ))}
+                    </optgroup>
+                  )}
+
+                  <optgroup label="🌐 Other Plant Blocks">
+                    {availableBlocks
+                      .filter(b => !dispatchBoy.assignedBlocks?.includes(b))
+                      .map(b => (
+                        <option key={`other_blk_${b}`} value={b}>🏢 Block: {b}</option>
+                      ))}
+                  </optgroup>
+
+                  <optgroup label="🌐 Other Plant Areas">
+                    {availableAreas
+                      .filter(a => !dispatchBoy.assignedAreas?.includes(a))
+                      .map(a => (
+                        <option key={`other_area_${a}`} value={a}>📍 Area: {a}</option>
+                      ))}
+                  </optgroup>
+                </select>
+              </div>
+            )}
 
             {/* Route Stats Summary Box */}
             <div className="p-3 bg-amber-50/70 border border-amber-200/80 rounded-2xl flex items-center justify-around text-center">
@@ -1127,11 +1225,58 @@ export default function DeliveryBoys() {
               </div>
               <div className="w-px h-8 bg-amber-200" />
               <div>
-                <span className="text-[10px] font-bold text-amber-700 block uppercase">Selected Target</span>
+                <span className="text-[10px] font-bold text-amber-700 block uppercase">Route Label</span>
                 <span className="text-xs font-bold text-amber-900 truncate max-w-[120px] block">
                   {dispatchRouteMetrics.routeLabel || 'Route'}
                 </span>
               </div>
+            </div>
+
+            {/* Live Customers Preview List */}
+            <div className="p-3 bg-gray-50/90 border border-gray-200/80 rounded-2xl space-y-2">
+              <div className="flex items-center justify-between text-xs font-bold text-gray-800">
+                <span className="flex items-center gap-1.5">
+                  <Users className="w-3.5 h-3.5 text-sky-600" />
+                  <span>Customers List Preview ({dispatchRouteMetrics.count})</span>
+                </span>
+                <span className="text-[11px] text-gray-500 font-normal">~{dispatchRouteMetrics.bottles} Botlein</span>
+              </div>
+
+              {dispatchRouteMetrics.count === 0 ? (
+                <p className="text-xs text-amber-700 italic py-1">
+                  Is selection par koi active customer nahi mila.
+                </p>
+              ) : (
+                <div className="max-h-28 overflow-y-auto space-y-1 pr-1">
+                  {dispatchRouteMetrics.matchedCustomers.slice(0, 15).map(c => (
+                    <div key={c.id} className="text-xs bg-white p-2 rounded-xl border border-gray-200/60 flex items-center justify-between gap-2 shadow-2xs">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="font-bold text-gray-900 truncate">{c.name}</span>
+                        {c.block && (
+                          <span className="text-[10px] bg-sky-50 text-sky-700 font-semibold px-1.5 py-0.2 rounded">
+                            🏢 {c.block}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className="text-[10px] bg-amber-50 text-amber-900 font-bold px-1.5 py-0.2 rounded-full border border-amber-200/60">
+                          {c.quantity || 1} Btl
+                        </span>
+                        {c.deliveryDays && c.deliveryDays.length > 0 && (
+                          <span className="text-[10px] bg-gray-100 text-gray-600 font-semibold px-1.5 py-0.2 rounded">
+                            {c.deliveryDays.join(',')}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {dispatchRouteMetrics.count > 15 && (
+                    <p className="text-[10px] text-gray-400 text-center font-semibold pt-1">
+                      + {dispatchRouteMetrics.count - 15} aur customers is route me hain
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Instruction Message */}
@@ -1200,9 +1345,13 @@ export default function DeliveryBoys() {
                   onClick={() => {
                     const boy = dispatchBoy;
                     setDispatchBoy(null);
-                    let url = `/quick-delivery?rider=${boy.id}`;
-                    if (selectedRouteTarget !== 'all_assigned') {
-                      url += `&block=${encodeURIComponent(selectedRouteTarget)}`;
+                    let url = `/quick-delivery?rider=${boy.id}&filterMode=${routeMode}`;
+                    if (routeMode === 'day') {
+                      url += `&day=${selectedDispatchDay}&block=all&area=all`;
+                    } else if (routeMode === 'block') {
+                      url += `&day=all&block=${encodeURIComponent(selectedRouteTarget)}`;
+                    } else {
+                      url += `&day=${selectedDispatchDay}&block=${encodeURIComponent(selectedRouteTarget)}`;
                     }
                     navigate(url);
                   }}

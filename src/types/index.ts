@@ -75,6 +75,8 @@ export interface RouteDispatchRecord {
   message?: string;
   dispatchedAt: string;
   status: 'active' | 'acknowledged' | 'completed';
+  dispatchMode?: 'day' | 'block' | 'both';
+  dispatchDay?: string;
 }
 
 export interface TruckSupply {

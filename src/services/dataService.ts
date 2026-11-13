@@ -1118,6 +1118,8 @@ export function saveRouteDispatch(
     message: dispatch.message || '',
     dispatchedAt: new Date().toISOString(),
     status: dispatch.status || 'active',
+    dispatchMode: dispatch.dispatchMode,
+    dispatchDay: dispatch.dispatchDay,
   };
 
   // Replace any existing active dispatch for this rider so only current route is active

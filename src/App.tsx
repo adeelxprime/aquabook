@@ -23,6 +23,7 @@ import Login from './pages/Login';
 import AdminLogin from './pages/admin/AdminLogin';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import SubscriptionExpired from './pages/SubscriptionExpired';
+import PWAInstallBanner from './components/PWAInstallBanner';
 
 function App() {
   return (
@@ -84,6 +85,8 @@ function App() {
           {/* Catch all */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        {/* Global PWA Mobile Install Banner (Available across all screens) */}
+        <PWAInstallBanner />
       </BrowserRouter>
     </AppProvider>
   );

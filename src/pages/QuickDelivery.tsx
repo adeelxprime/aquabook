@@ -21,6 +21,8 @@ export default function QuickDelivery() {
   const riderParam = searchParams.get('rider');
   const blockParam = searchParams.get('block');
   const areaParam = searchParams.get('area');
+  const dayParam = searchParams.get('day');
+  const filterModeParam = searchParams.get('filterMode');
 
   const { 
     customers, deliveries, addDelivery, updateDelivery, 
@@ -55,7 +57,7 @@ export default function QuickDelivery() {
       return 'Mon';
     }
   }, [selectedDate]);
-  const [selectedDaySchedule, setSelectedDaySchedule] = useState<string>('auto');
+  const [selectedDaySchedule, setSelectedDaySchedule] = useState<string>(dayParam || 'auto');
 
   // Vehicle Stock & Anti-Theft Tracker (Point 6 & Point 8)
   const [vehicleMode, setVehicleMode] = useState<'regular' | 'bulk'>('regular');
@@ -93,24 +95,26 @@ export default function QuickDelivery() {
   }, [deliveryBoys, selectedRiderId]);
 
   useEffect(() => {
-    if (blockParam) setBlockFilter(blockParam);
-    if (areaParam) setAreaFilter(areaParam);
-  }, [blockParam, areaParam]);
+    if (dayParam) {
+      setSelectedDaySchedule(dayParam);
+    }
+    if (filterModeParam === 'day') {
+      setBlockFilter('all');
+      setAreaFilter('all');
+    } else {
+      if (blockParam) setBlockFilter(blockParam);
+      if (areaParam) setAreaFilter(areaParam);
+    }
+  }, [dayParam, blockParam, areaParam, filterModeParam]);
 
   useEffect(() => {
     if (isRiderLoggedIn && loggedInRiderId) {
       setSelectedRiderId(loggedInRiderId);
-      const riderObj = deliveryBoys.find(b => b.id === loggedInRiderId);
-      if (riderObj?.assignedBlocks && riderObj.assignedBlocks.length > 0 && blockFilter === 'all' && !blockParam) {
-        setBlockFilter(riderObj.assignedBlocks[0]);
-      }
-      if (riderObj?.assignedAreas && riderObj.assignedAreas.length > 0 && areaFilter === 'all' && !areaParam) {
-        setAreaFilter(riderObj.assignedAreas[0]);
-      }
+      // NOTE: Removed forced block locking (setBlockFilter) so rider sees all their scheduled customers for today
     } else if (riderParam) {
       setSelectedRiderId(riderParam);
     }
-  }, [riderParam, isRiderLoggedIn, loggedInRiderId, deliveryBoys, blockParam, areaParam]);
+  }, [riderParam, isRiderLoggedIn, loggedInRiderId]);
 
   // Multi-Customer Selection State
   const [selectedCustomerIds, setSelectedCustomerIds] = useState<string[]>([]);
@@ -779,11 +783,35 @@ export default function QuickDelivery() {
                   if (typeof acknowledgeRouteDispatch === 'function') {
                     acknowledgeRouteDispatch(activeRouteNotification.id);
                   }
-                  if (activeRouteNotification.areaOrBlock && activeRouteNotification.areaOrBlock !== 'All Assigned Areas') {
-                    if (distinctBlocks.includes(activeRouteNotification.areaOrBlock)) {
-                      setBlockFilter(activeRouteNotification.areaOrBlock);
-                    } else if (areas.includes(activeRouteNotification.areaOrBlock)) {
-                      setAreaFilter(activeRouteNotification.areaOrBlock);
+                  if (activeRouteNotification.dispatchMode === 'day') {
+                    setSelectedDaySchedule(activeRouteNotification.dispatchDay || 'auto');
+                    setBlockFilter('all');
+                    setAreaFilter('all');
+                  } else if (activeRouteNotification.dispatchMode === 'block') {
+                    setSelectedDaySchedule('all');
+                    if (activeRouteNotification.areaOrBlock) {
+                      if (distinctBlocks.includes(activeRouteNotification.areaOrBlock)) {
+                        setBlockFilter(activeRouteNotification.areaOrBlock);
+                      } else if (areas.includes(activeRouteNotification.areaOrBlock)) {
+                        setAreaFilter(activeRouteNotification.areaOrBlock);
+                      }
+                    }
+                  } else if (activeRouteNotification.dispatchMode === 'both') {
+                    setSelectedDaySchedule(activeRouteNotification.dispatchDay || 'auto');
+                    if (activeRouteNotification.areaOrBlock) {
+                      if (distinctBlocks.includes(activeRouteNotification.areaOrBlock)) {
+                        setBlockFilter(activeRouteNotification.areaOrBlock);
+                      } else if (areas.includes(activeRouteNotification.areaOrBlock)) {
+                        setAreaFilter(activeRouteNotification.areaOrBlock);
+                      }
+                    }
+                  } else {
+                    if (activeRouteNotification.areaOrBlock && activeRouteNotification.areaOrBlock !== 'All Assigned Areas') {
+                      if (distinctBlocks.includes(activeRouteNotification.areaOrBlock)) {
+                        setBlockFilter(activeRouteNotification.areaOrBlock);
+                      } else if (areas.includes(activeRouteNotification.areaOrBlock)) {
+                        setAreaFilter(activeRouteNotification.areaOrBlock);
+                      }
                     }
                   }
                   toast.success('Route shuru kar diya gaya hai! Deliveries complete karein.');

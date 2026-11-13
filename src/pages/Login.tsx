@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Droplets, Eye, EyeOff, ArrowRight, AlertTriangle, Building2, Bike, ShieldCheck } from 'lucide-react';
+import { Droplets, Eye, EyeOff, ArrowRight, AlertTriangle, Building2, Bike, ShieldCheck, Download, Smartphone } from 'lucide-react';
 import { loginBusiness, loginDeliveryBoy, syncBusinessesFromSupabase } from '../services/adminService';
+import { isAppInstalled, triggerDirectInstall, subscribePwaState } from '../services/pwaInstallService';
 import toast from 'react-hot-toast';
 
 export default function Login() {
@@ -13,9 +14,13 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [secretClicks, setSecretClicks] = useState(0);
+  const [isInstalled, setIsInstalled] = useState(isAppInstalled());
 
   useEffect(() => {
     syncBusinessesFromSupabase().catch(() => {});
+    setIsInstalled(isAppInstalled());
+    const unsub = subscribePwaState(() => setIsInstalled(isAppInstalled()));
+    return () => unsub();
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -188,6 +193,38 @@ export default function Login() {
               )}
             </button>
           </form>
+
+          {/* 1-Click Direct Install App Option */}
+          {!isInstalled && (
+            <div className="mt-5 pt-4 border-t border-gray-100 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center shrink-0 border border-sky-100">
+                  <Smartphone className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-gray-900 truncate">Mobile App</p>
+                  <p className="text-[11px] text-gray-500 truncate">Screen par direct install karein</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={async () => {
+                  const outcome = await triggerDirectInstall();
+                  if (outcome === 'accepted') {
+                    toast.success('AquaBook app direct install ho gayi!');
+                    setIsInstalled(true);
+                  } else if (outcome === 'already_installed') {
+                    toast.success('AquaBook pehle se installed hai!');
+                    setIsInstalled(true);
+                  }
+                }}
+                className="px-3 py-1.5 bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center gap-1.5 shrink-0 cursor-pointer active:scale-95"
+              >
+                <Download className="w-3.5 h-3.5 stroke-[2.5]" />
+                <span>Install App</span>
+              </button>
+            </div>
+          )}
         </div>
 
       </div>

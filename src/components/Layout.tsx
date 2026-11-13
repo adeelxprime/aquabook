@@ -4,13 +4,13 @@ import {
   LayoutDashboard, Users, Truck, CreditCard, BarChart3, 
   Settings, Menu, X, Droplets, ChevronLeft, LogOut, ShieldCheck, 
   Sparkles, Calendar, MessageSquare, Smartphone, RefreshCw, Wifi, WifiOff,
-  Bike, Fuel
+  Bike, Fuel, Download
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { getAuth, getBusinessById, logout } from '../services/adminService';
 import { isSupabaseConfigured } from '../services/supabaseClient';
 import { syncLocalDataToSupabase } from '../services/supabaseService';
-import PWAInstallBanner from './PWAInstallBanner';
+import { isAppInstalled, triggerDirectInstall, subscribePwaState } from '../services/pwaInstallService';
 import toast from 'react-hot-toast';
 
 const navItems = [
@@ -37,6 +37,14 @@ export default function Layout() {
   const business = auth.businessId ? getBusinessById(auth.businessId) : null;
   const isSuperAdmin = auth.userType === 'admin';
   const isRider = auth.userType === 'delivery_boy';
+
+  const [appInstalled, setAppInstalled] = useState(isAppInstalled());
+
+  useEffect(() => {
+    setAppInstalled(isAppInstalled());
+    const unsub = subscribePwaState(() => setAppInstalled(isAppInstalled()));
+    return () => unsub();
+  }, []);
 
   // If rider visits root '/', redirect to quick-delivery
   useEffect(() => {
@@ -186,24 +194,44 @@ export default function Layout() {
         )}
 
         {/* Footer / Logout */}
-        <div className="p-3 border-t border-gray-100 flex items-center justify-between">
-          <button
-            onClick={handleLogout}
-            className={`flex items-center gap-2 text-xs font-medium text-gray-500 hover:text-rose-600 hover:bg-rose-50 px-2.5 py-2 rounded-xl transition-colors w-full ${
-              collapsed ? 'justify-center' : ''
-            }`}
-            title="Sign Out"
-          >
-            <LogOut className="w-4 h-4 text-gray-400 group-hover:text-rose-600" />
-            {!collapsed && <span>Sign Out</span>}
-          </button>
+        <div className="p-3 border-t border-gray-100 flex flex-col gap-1.5">
+          {!appInstalled && (
+            <button
+              type="button"
+              onClick={async () => {
+                const outcome = await triggerDirectInstall();
+                if (outcome === 'accepted') toast.success('AquaBook direct install ho gayi!');
+                else if (outcome === 'already_installed') toast.success('AquaBook pehle se installed hai!');
+              }}
+              className={`flex items-center gap-2 text-xs font-bold text-sky-700 bg-sky-50 hover:bg-sky-100 border border-sky-200/80 px-2.5 py-2 rounded-xl transition-all cursor-pointer active:scale-95 ${
+                collapsed ? 'justify-center' : ''
+              }`}
+              title="AquaBook mobile ya desktop par direct install karein"
+            >
+              <Download className="w-4 h-4 text-sky-600 shrink-0 stroke-[2.5]" />
+              {!collapsed && <span>Install App</span>}
+            </button>
+          )}
 
-          <button 
-            onClick={() => setCollapsed(!collapsed)} 
-            className="hidden lg:flex p-1.5 hover:bg-gray-100 rounded-lg text-gray-400 transition-colors ml-1"
-          >
-            <ChevronLeft className={`w-4 h-4 transition-transform ${collapsed ? 'rotate-180' : ''}`} />
-          </button>
+          <div className="flex items-center justify-between">
+            <button
+              onClick={handleLogout}
+              className={`flex items-center gap-2 text-xs font-medium text-gray-500 hover:text-rose-600 hover:bg-rose-50 px-2.5 py-2 rounded-xl transition-colors w-full ${
+                collapsed ? 'justify-center' : ''
+              }`}
+              title="Sign Out"
+            >
+              <LogOut className="w-4 h-4 text-gray-400 group-hover:text-rose-600" />
+              {!collapsed && <span>Sign Out</span>}
+            </button>
+
+            <button 
+              onClick={() => setCollapsed(!collapsed)} 
+              className="hidden lg:flex p-1.5 hover:bg-gray-100 rounded-lg text-gray-400 transition-colors ml-1"
+            >
+              <ChevronLeft className={`w-4 h-4 transition-transform ${collapsed ? 'rotate-180' : ''}`} />
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -248,6 +276,24 @@ export default function Layout() {
                 <WifiOff className="w-3.5 h-3.5 text-amber-600" />
                 <span>Offline Mode</span>
               </div>
+            )}
+
+            {/* Direct 1-Click Install App Button */}
+            {!appInstalled && (
+              <button
+                type="button"
+                onClick={async () => {
+                  const outcome = await triggerDirectInstall();
+                  if (outcome === 'accepted') toast.success('AquaBook direct install ho gayi!');
+                  else if (outcome === 'already_installed') toast.success('AquaBook pehle se installed hai!');
+                }}
+                className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer active:scale-95"
+                title="AquaBook direct install karein"
+              >
+                <Download className="w-3.5 h-3.5 stroke-[2.5]" />
+                <span className="hidden sm:inline">Install App</span>
+                <span className="sm:hidden">Install</span>
+              </button>
             )}
 
             {/* 1-Click Cloud Sync Button */}
@@ -298,9 +344,6 @@ export default function Layout() {
             <Outlet />
           </div>
         </main>
-
-        {/* PWA Mobile Add to Screen Banner */}
-        <PWAInstallBanner />
 
         {/* Mobile Bottom Navigation Bar */}
         <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 z-30">

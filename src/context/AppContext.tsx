@@ -70,6 +70,8 @@ interface AppContextType {
     customerCount: number;
     bottleCount: number;
     message?: string;
+    dispatchMode?: 'day' | 'block' | 'both';
+    dispatchDay?: string;
   }) => RouteDispatchRecord;
   acknowledgeRouteDispatch: (id: string) => void;
   getActiveRouteForRider: (riderId: string) => RouteDispatchRecord | null;
@@ -308,6 +310,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     customerCount: number;
     bottleCount: number;
     message?: string;
+    dispatchMode?: 'day' | 'block' | 'both';
+    dispatchDay?: string;
   }) => {
     const result = db.saveRouteDispatch(params);
     const currentAuth = getAuth();
