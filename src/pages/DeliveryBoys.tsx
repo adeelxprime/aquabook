@@ -9,7 +9,7 @@ import {
   Users, UserPlus, Phone, Bike, Truck, Check, X, Clock, 
   MessageSquare, Edit, Trash2, MapPin, Target, Droplets, 
   DollarSign, AlertCircle, ExternalLink, ShieldCheck, Building2, RefreshCw,
-  Send, Bell, CheckCircle2
+  Send, Bell, CheckCircle2, Calendar
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
@@ -69,12 +69,15 @@ export default function DeliveryBoys() {
   }, [customers]);
 
   // Route Dispatch & Notification State
+  const currentDayName = format(new Date(), 'EEE');
+  const [selectedDispatchDay, setSelectedDispatchDay] = useState<string>(currentDayName);
   const [dispatchBoy, setDispatchBoy] = useState<DeliveryBoy | null>(null);
   const [selectedRouteTarget, setSelectedRouteTarget] = useState<string>('all_assigned');
   const [customRouteNote, setCustomRouteNote] = useState<string>('Jaldi se water deliver kar ke register update karein!');
 
   const handleOpenDispatch = (boy: DeliveryBoy) => {
     setDispatchBoy(boy);
+    setSelectedDispatchDay(currentDayName);
     const defaultTarget = boy.assignedBlocks?.[0] || boy.assignedAreas?.[0] || 'all_assigned';
     setSelectedRouteTarget(defaultTarget);
     setCustomRouteNote('Jaldi se water deliver kar ke register update karein!');
@@ -89,6 +92,13 @@ export default function DeliveryBoys() {
 
     const matchedCustomers = customers.filter(c => {
       if (c.status !== 'active') return false;
+
+      // Strict Day schedule filter
+      const matchesDay = selectedDispatchDay === 'all'
+        ? true
+        : Boolean(c.deliveryDays && c.deliveryDays.includes(selectedDispatchDay));
+      if (!matchesDay) return false;
+
       if (isAllAssigned) {
         if (c.assignedDeliveryBoyId === dispatchBoy.id) return true;
         if (c.assignedDeliveryBoyId && c.assignedDeliveryBoyId !== dispatchBoy.id) return false;
@@ -104,13 +114,13 @@ export default function DeliveryBoys() {
     });
 
     const count = matchedCustomers.length;
-    const bottles = matchedCustomers.reduce((sum, c) => sum + (c.defaultQuantity || 1), 0);
+    const bottles = matchedCustomers.reduce((sum, c) => sum + (c.quantity || 1), 0);
     const routeLabel = isAllAssigned
       ? (assignedBlocks.join(', ') || assignedAreas.join(', ') || 'All Assigned Areas')
       : selectedRouteTarget;
 
     return { count, bottles, routeLabel };
-  }, [dispatchBoy, selectedRouteTarget, customers]);
+  }, [dispatchBoy, selectedRouteTarget, customers, selectedDispatchDay]);
 
   const handleSendWhatsAppNotification = () => {
     if (!dispatchBoy) return;
@@ -120,7 +130,7 @@ export default function DeliveryBoys() {
       riderId: dispatchBoy.id,
       riderName: dispatchBoy.name,
       riderPhone: dispatchBoy.phone,
-      areaOrBlock: routeLabel || 'Assigned Route',
+      areaOrBlock: `${routeLabel || 'Assigned Route'} (${selectedDispatchDay === 'all' ? 'All Days' : selectedDispatchDay})`,
       customerCount: count,
       bottleCount: bottles,
       message: customRouteNote.trim(),
@@ -129,7 +139,8 @@ export default function DeliveryBoys() {
     const cleanPhone = dispatchBoy.phone.replace(/[^0-9]/g, '');
     const targetPhone = cleanPhone.startsWith('0') ? '92' + cleanPhone.substring(1) : cleanPhone;
 
-    const textMsg = `Salam ${dispatchBoy.name} bhai! Aapka route "${routeLabel || 'Today Route'}" assign ho gaya hai (${count} Customers, ~${bottles} Bottles).${customRouteNote.trim() ? ' Hidayat: ' + customRouteNote.trim() + '.' : ''} Apne mobile pe login kar ke deliver karein. - AquaBook`;
+    const dayText = selectedDispatchDay === 'all' ? '' : ` [${selectedDispatchDay} Schedule]`;
+    const textMsg = `Salam ${dispatchBoy.name} bhai! Aapka route "${routeLabel || 'Today Route'}"${dayText} assign ho gaya hai (${count} Customers, ~${bottles} Bottles).${customRouteNote.trim() ? ' Hidayat: ' + customRouteNote.trim() + '.' : ''} Apne mobile pe login kar ke deliver karein. - AquaBook`;
 
     window.open(`https://wa.me/${targetPhone}?text=${encodeURIComponent(textMsg)}`, '_blank');
     toast.success(`✅ ${dispatchBoy.name} ko WhatsApp route alert bhej diya gaya hai!`);
@@ -144,13 +155,14 @@ export default function DeliveryBoys() {
       riderId: dispatchBoy.id,
       riderName: dispatchBoy.name,
       riderPhone: dispatchBoy.phone,
-      areaOrBlock: routeLabel || 'Assigned Route',
+      areaOrBlock: `${routeLabel || 'Assigned Route'} (${selectedDispatchDay === 'all' ? 'All Days' : selectedDispatchDay})`,
       customerCount: count,
       bottleCount: bottles,
       message: customRouteNote.trim(),
     });
 
-    const textMsg = `Salam ${dispatchBoy.name}! Route "${routeLabel}" assign ho gaya (${count} Customers, ~${bottles} Bottles).${customRouteNote.trim() ? ' ' + customRouteNote.trim() : ''} Login kar ke delivery shuru karein. - AquaBook`;
+    const dayText = selectedDispatchDay === 'all' ? '' : ` [${selectedDispatchDay} Schedule]`;
+    const textMsg = `Salam ${dispatchBoy.name}! Route "${routeLabel}"${dayText} assign ho gaya (${count} Customers, ~${bottles} Bottles).${customRouteNote.trim() ? ' ' + customRouteNote.trim() : ''} Login kar ke delivery shuru karein. - AquaBook`;
 
     window.open(`sms:${dispatchBoy.phone}?body=${encodeURIComponent(textMsg)}`, '_self');
     toast.success(`✅ ${dispatchBoy.name} ke liye SMS route alert open ho gaya!`);
@@ -165,7 +177,7 @@ export default function DeliveryBoys() {
       riderId: dispatchBoy.id,
       riderName: dispatchBoy.name,
       riderPhone: dispatchBoy.phone,
-      areaOrBlock: routeLabel || 'Assigned Route',
+      areaOrBlock: `${routeLabel || 'Assigned Route'} (${selectedDispatchDay === 'all' ? 'All Days' : selectedDispatchDay})`,
       customerCount: count,
       bottleCount: bottles,
       message: customRouteNote.trim(),
@@ -1058,6 +1070,48 @@ export default function DeliveryBoys() {
                     ))}
                 </optgroup>
               </select>
+            </div>
+
+            {/* Day Schedule Selection (Mon - Sun) */}
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1.5 flex items-center gap-1.5">
+                <Calendar className="w-3.5 h-3.5 text-sky-600" />
+                <span>Delivery Din (Day Schedule Filter):</span>
+              </label>
+              <div className="grid grid-cols-4 sm:grid-cols-8 gap-1.5">
+                {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => (
+                  <button
+                    key={day}
+                    type="button"
+                    onClick={() => setSelectedDispatchDay(day)}
+                    className={`py-1.5 px-1 rounded-xl text-xs font-bold transition-all text-center ${
+                      selectedDispatchDay === day
+                        ? 'bg-sky-600 text-white shadow-xs'
+                        : currentDayName === day
+                        ? 'bg-sky-50 text-sky-800 border border-sky-300 hover:bg-sky-100'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    {day}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setSelectedDispatchDay('all')}
+                  className={`py-1.5 px-1 rounded-xl text-xs font-bold transition-all text-center ${
+                    selectedDispatchDay === 'all'
+                      ? 'bg-sky-600 text-white shadow-xs'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  All
+                </button>
+              </div>
+              <p className="text-[11px] text-gray-500 mt-1">
+                {selectedDispatchDay === 'all'
+                  ? 'Sab dinon ke customers count honge.'
+                  : `Sirf wahi customers samne aayenge jinki delivery ${selectedDispatchDay} ko schedule hai.`}
+              </p>
             </div>
 
             {/* Route Stats Summary Box */}

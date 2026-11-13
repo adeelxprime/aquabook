@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
-import { PageHeader, Card, Button, SearchInput, EmptyState } from '../components/ui';
+import { PageHeader, Card, Button, SearchInput, EmptyState, Modal } from '../components/ui';
 import { 
   getAllCustomersMonthlyBills, openWhatsAppBill, openSmsBill, 
   generateMonthlyBillPdf, getCustomerMonthlyBill, formatWhatsAppBillMessage 
@@ -9,7 +9,8 @@ import type { CustomerMonthlyBill } from '../types';
 import { 
   Calendar, FileDown, MessageSquare, Phone, Send, 
   ChevronLeft, ChevronRight, Eye, Droplets, CheckCircle2, 
-  AlertCircle, X, Copy, ExternalLink
+  AlertCircle, X, Copy, ExternalLink, CheckSquare, Square, 
+  Zap, Loader2, ArrowRight
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -20,7 +21,22 @@ export default function MonthlyBills() {
   const currentMonthDefault = new Date().toISOString().slice(0, 7);
   const [selectedMonth, setSelectedMonth] = useState<string>(currentMonthDefault);
   const [search, setSearch] = useState('');
+  const [selectedDayFilter, setSelectedDayFilter] = useState<'all' | 'Mon' | 'Tue' | 'Wed' | 'Thu' | 'Fri' | 'Sat' | 'Sun' | 'unscheduled'>('all');
   const [selectedBillForModal, setSelectedBillForModal] = useState<CustomerMonthlyBill | null>(null);
+
+  // Batch Multi-Customer Selection & Dispatch (Point 7)
+  const [selectedCustomerIds, setSelectedCustomerIds] = useState<string[]>([]);
+  const [isQueueModalOpen, setIsQueueModalOpen] = useState(false);
+  const [queueIndex, setQueueIndex] = useState(0);
+  const [isDownloadingPdfs, setIsDownloadingPdfs] = useState(false);
+  const [pdfProgress, setPdfProgress] = useState('');
+
+  // Fast customer lookup
+  const customerMap = useMemo(() => {
+    const map = new Map<string, typeof customers[0]>();
+    customers.forEach(c => map.set(c.id, c));
+    return map;
+  }, [customers]);
 
   // Month navigation
   const handlePrevMonth = () => {
@@ -47,16 +63,27 @@ export default function MonthlyBills() {
     return getAllCustomersMonthlyBills(selectedMonth);
   }, [selectedMonth, customers, deliveries, payments]);
 
-  // Filtered bills
+  // Filtered bills by Search AND Day-wise Customer Schedule
   const filteredBills = useMemo(() => {
-    if (!search.trim()) return bills;
-    const q = search.toLowerCase();
-    return bills.filter(b => 
-      b.customerName.toLowerCase().includes(q) ||
-      b.customerPhone.includes(q) ||
-      b.customerAddress.toLowerCase().includes(q)
-    );
-  }, [bills, search]);
+    return bills.filter(b => {
+      // Search filter
+      if (search.trim()) {
+        const q = search.toLowerCase();
+        const matchSearch = b.customerName.toLowerCase().includes(q) ||
+          b.customerPhone.includes(q) ||
+          b.customerAddress.toLowerCase().includes(q);
+        if (!matchSearch) return false;
+      }
+
+      // Day Schedule Filter
+      const cust = customerMap.get(b.customerId);
+      const days = b.deliveryDays || cust?.deliveryDays;
+
+      if (selectedDayFilter === 'all') return true;
+      if (selectedDayFilter === 'unscheduled') return !days || days.length === 0;
+      return Boolean(days && days.includes(selectedDayFilter));
+    });
+  }, [bills, search, selectedDayFilter, customerMap]);
 
   // Totals for this month
   const totals = useMemo(() => {
@@ -73,6 +100,54 @@ export default function MonthlyBills() {
   }, [bills]);
 
   const sym = settings.currencySymbol || 'Rs.';
+
+  // Batch Multi-Select Computed List
+  const selectedBills = useMemo(() => {
+    return bills.filter(b => selectedCustomerIds.includes(b.customerId));
+  }, [bills, selectedCustomerIds]);
+
+  const toggleSelectCustomer = (id: string) => {
+    setSelectedCustomerIds(prev => 
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  };
+
+  const selectAllCustomers = () => {
+    if (selectedCustomerIds.length === filteredBills.length && filteredBills.length > 0) {
+      setSelectedCustomerIds([]);
+    } else {
+      setSelectedCustomerIds(filteredBills.map(b => b.customerId));
+    }
+  };
+
+  const handleStartQueue = () => {
+    if (selectedBills.length === 0) {
+      toast.error('Baraye meharbani pehle customers select karein.');
+      return;
+    }
+    setQueueIndex(0);
+    setIsQueueModalOpen(true);
+  };
+
+  const handleDownloadAllPdfs = async () => {
+    if (selectedBills.length === 0) return;
+    setIsDownloadingPdfs(true);
+    try {
+      for (let i = 0; i < selectedBills.length; i++) {
+        const b = selectedBills[i];
+        setPdfProgress(`${i + 1} / ${selectedBills.length}: ${b.customerName}`);
+        generateMonthlyBillPdf(b, settings);
+        await new Promise(r => setTimeout(r, 350));
+      }
+      toast.success(`Mubarak! Tamam ${selectedBills.length} customers ke PDF bills download ho gaye!`);
+    } catch (err) {
+      console.error(err);
+      toast.error('PDFs download karne me masla aaya.');
+    } finally {
+      setIsDownloadingPdfs(false);
+      setPdfProgress('');
+    }
+  };
 
   // Actions
   const handleSendWhatsApp = (bill: CustomerMonthlyBill) => {
@@ -188,17 +263,210 @@ export default function MonthlyBills() {
               placeholder="Search customer by name, mobile number, or address..."
             />
           </div>
-          <div className="flex items-center gap-2">
-            <label className="text-xs font-semibold text-gray-500 whitespace-nowrap">Select Month:</label>
-            <input
-              type="month"
-              value={selectedMonth}
-              onChange={(e) => setSelectedMonth(e.target.value)}
-              className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-sky-500/20"
-            />
+          <div className="flex items-center gap-2 flex-wrap">
+            <select
+              value={selectedDayFilter}
+              onChange={(e) => {
+                setSelectedDayFilter(e.target.value as any);
+                setSelectedCustomerIds([]);
+              }}
+              className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-semibold text-gray-700 focus:outline-none focus:ring-2 focus:ring-sky-500/20"
+            >
+              <option value="all">📅 Sab Din ({bills.length})</option>
+              <option value="Mon">Mon (Monday)</option>
+              <option value="Tue">Tue (Tuesday)</option>
+              <option value="Wed">Wed (Wednesday)</option>
+              <option value="Thu">Thu (Thursday)</option>
+              <option value="Fri">Fri (Friday)</option>
+              <option value="Sat">Sat (Saturday)</option>
+              <option value="Sun">Sun (Sunday)</option>
+              <option value="unscheduled">⚠️ Schedule Baqi</option>
+            </select>
+
+            {filteredBills.length > 0 && (
+              <button
+                type="button"
+                onClick={selectAllCustomers}
+                className={`px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  selectedCustomerIds.length === filteredBills.length
+                    ? 'bg-sky-600 text-white shadow-xs'
+                    : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+                }`}
+              >
+                <CheckSquare className="w-3.5 h-3.5" />
+                <span>
+                  {selectedCustomerIds.length === filteredBills.length
+                    ? 'Deselect All'
+                    : `Select All (${filteredBills.length})`}
+                </span>
+              </button>
+            )}
+            <div className="flex items-center gap-1.5">
+              <label className="text-xs font-semibold text-gray-500 whitespace-nowrap">Select Month:</label>
+              <input
+                type="month"
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(e.target.value)}
+                className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-sky-500/20"
+              />
+            </div>
           </div>
         </div>
       </Card>
+
+      {/* Day-Wise Schedule 1-Click Filter Chips Bar */}
+      <div className="bg-white p-2.5 sm:p-3 rounded-2xl border border-gray-200/80 shadow-2xs">
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+          <span className="text-xs font-bold text-gray-700 flex items-center gap-1.5 whitespace-nowrap px-1 mr-1">
+            <Calendar className="w-4 h-4 text-sky-600" />
+            <span>Din Ka Schedule:</span>
+          </span>
+
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedDayFilter('all');
+              setSelectedCustomerIds([]);
+            }}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 ${
+              selectedDayFilter === 'all'
+                ? 'bg-sky-600 text-white shadow-xs'
+                : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+            }`}
+          >
+            <span>Sab Din</span>
+            <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
+              selectedDayFilter === 'all' ? 'bg-white/20 text-white' : 'bg-gray-200 text-gray-700'
+            }`}>
+              {bills.length}
+            </span>
+          </button>
+
+          {(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const).map(day => {
+            const dayCount = bills.filter(b => {
+              const cust = customerMap.get(b.customerId);
+              const days = b.deliveryDays || cust?.deliveryDays;
+              return days?.includes(day);
+            }).length;
+            const isCurrent = selectedDayFilter === day;
+            return (
+              <button
+                key={day}
+                type="button"
+                onClick={() => {
+                  setSelectedDayFilter(day);
+                  setSelectedCustomerIds([]);
+                }}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 ${
+                  isCurrent
+                    ? 'bg-sky-600 text-white shadow-xs'
+                    : 'bg-sky-50/70 hover:bg-sky-100 text-sky-900 border border-sky-100'
+                }`}
+              >
+                <span>{day}</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
+                  isCurrent ? 'bg-white/20 text-white' : 'bg-sky-200/70 text-sky-900'
+                }`}>
+                  {dayCount}
+                </span>
+              </button>
+            );
+          })}
+
+          {bills.some(b => {
+            const cust = customerMap.get(b.customerId);
+            const days = b.deliveryDays || cust?.deliveryDays;
+            return !days || days.length === 0;
+          }) && (
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedDayFilter('unscheduled');
+                setSelectedCustomerIds([]);
+              }}
+              className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 ${
+                selectedDayFilter === 'unscheduled'
+                  ? 'bg-amber-600 text-white shadow-xs'
+                  : 'bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200'
+              }`}
+            >
+              <span>Schedule Baqi</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
+                selectedDayFilter === 'unscheduled' ? 'bg-white/20 text-white' : 'bg-amber-200 text-amber-900'
+              }`}>
+                {bills.filter(b => {
+                  const cust = customerMap.get(b.customerId);
+                  const days = b.deliveryDays || cust?.deliveryDays;
+                  return !days || days.length === 0;
+                }).length}
+              </span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* 1-Click Multi-Customer Batch Dispatch Bar (Point 7) */}
+      {selectedCustomerIds.length > 0 && (
+        <div className="sticky top-4 z-30 bg-gradient-to-r from-emerald-600 via-teal-700 to-sky-700 text-white p-3.5 sm:p-4 rounded-2xl shadow-xl flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 animate-in fade-in slide-in-from-top-2 border border-emerald-400/40">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-white/20 backdrop-blur-md flex items-center justify-center shrink-0">
+              <CheckSquare className="w-5 h-5 text-emerald-200" />
+            </div>
+            <div>
+              <span className="text-xs text-emerald-100 font-bold uppercase tracking-wider block">
+                Batch WhatsApp & PDF Bill Dispatcher
+              </span>
+              <p className="text-sm sm:text-base font-black text-white">
+                {selectedCustomerIds.length} Customers Selected
+                <span className="text-xs font-normal text-emerald-100 ml-2">
+                  (Total Due: {sym}{selectedBills.reduce((s, b) => s + b.netOutstanding, 0).toLocaleString()})
+                </span>
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* 1-Click WhatsApp Queue Runner */}
+            <button
+              type="button"
+              onClick={handleStartQueue}
+              className="flex-1 sm:flex-none px-4 py-2.5 bg-white hover:bg-emerald-50 text-emerald-900 rounded-xl font-bold text-xs shadow-md transition-all flex items-center justify-center gap-1.5 active:scale-95"
+            >
+              <MessageSquare className="w-4 h-4 text-emerald-600" />
+              <span>🚀 1-Click WhatsApp Dispatch ({selectedCustomerIds.length})</span>
+            </button>
+
+            {/* Batch PDF Downloader */}
+            <button
+              type="button"
+              disabled={isDownloadingPdfs}
+              onClick={handleDownloadAllPdfs}
+              className="flex-1 sm:flex-none px-4 py-2.5 bg-sky-500 hover:bg-sky-400 text-white rounded-xl font-bold text-xs shadow-md transition-all flex items-center justify-center gap-1.5 disabled:opacity-60"
+            >
+              {isDownloadingPdfs ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>{pdfProgress || 'Downloading...'}</span>
+                </>
+              ) : (
+                <>
+                  <FileDown className="w-4 h-4" />
+                  <span>📥 Download All {selectedCustomerIds.length} PDFs</span>
+                </>
+              )}
+            </button>
+
+            {/* Deselect button */}
+            <button
+              type="button"
+              onClick={() => setSelectedCustomerIds([])}
+              className="px-3 py-2 text-emerald-100 hover:text-white text-xs font-semibold underline"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Customer Billing Records Table */}
       {filteredBills.length === 0 ? (
@@ -216,6 +484,15 @@ export default function MonthlyBills() {
                 <table className="w-full text-left">
                   <thead>
                     <tr className="border-b border-gray-100 bg-gray-50/60 text-[11px] font-bold uppercase tracking-wider text-gray-500">
+                      <th className="px-4 py-3.5 w-12 text-center">
+                        <input
+                          type="checkbox"
+                          checked={filteredBills.length > 0 && selectedCustomerIds.length === filteredBills.length}
+                          onChange={selectAllCustomers}
+                          className="w-4 h-4 rounded text-sky-600 focus:ring-sky-500 cursor-pointer"
+                          title="Select / Deselect All Customers"
+                        />
+                      </th>
                       <th className="px-5 py-3.5">Customer & Contact</th>
                       <th className="px-4 py-3.5 text-center">Month Bottles</th>
                       <th className="px-4 py-3.5">Month Bill</th>
@@ -227,10 +504,40 @@ export default function MonthlyBills() {
                   </thead>
                   <tbody className="divide-y divide-gray-50 text-sm">
                     {filteredBills.map(bill => (
-                      <tr key={bill.customerId} className="hover:bg-sky-50/30 transition-colors">
+                      <tr key={bill.customerId} className={`transition-colors ${selectedCustomerIds.includes(bill.customerId) ? 'bg-sky-50/60' : 'hover:bg-sky-50/30'}`}>
+                        {/* Row Checkbox */}
+                        <td className="px-4 py-4 text-center">
+                          <input
+                            type="checkbox"
+                            checked={selectedCustomerIds.includes(bill.customerId)}
+                            onChange={() => toggleSelectCustomer(bill.customerId)}
+                            className="w-4 h-4 rounded text-sky-600 focus:ring-sky-500 cursor-pointer"
+                          />
+                        </td>
+
                         {/* Customer */}
                         <td className="px-5 py-4">
-                          <div className="font-bold text-gray-900">{bill.customerName}</div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-gray-900">{bill.customerName}</span>
+                            {(() => {
+                              const cust = customerMap.get(bill.customerId);
+                              const days = bill.deliveryDays || cust?.deliveryDays;
+                              if (days && days.length > 0 && days.length < 7) {
+                                return (
+                                  <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                                    📅 {days.join(', ')}
+                                  </span>
+                                );
+                              } else if (days && days.length === 7) {
+                                return (
+                                  <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                    📅 Daily
+                                  </span>
+                                );
+                              }
+                              return null;
+                            })()}
+                          </div>
                           <div className="text-xs text-gray-500 flex items-center gap-1.5 mt-0.5">
                             <Phone className="w-3 h-3 text-gray-400" />
                             <span>{bill.customerPhone}</span>
@@ -325,15 +632,57 @@ export default function MonthlyBills() {
 
           {/* Mobile Cards View */}
           <div className="grid grid-cols-1 gap-3 lg:hidden">
+            <div className="flex items-center justify-between px-1 py-1">
+              <button
+                type="button"
+                onClick={selectAllCustomers}
+                className="text-xs font-bold text-sky-700 underline flex items-center gap-1"
+              >
+                <CheckSquare className="w-3.5 h-3.5" />
+                <span>{selectedCustomerIds.length === filteredBills.length ? 'Deselect All' : `Select All (${filteredBills.length} Customers)`}</span>
+              </button>
+              <span className="text-xs font-semibold text-gray-500">
+                {selectedCustomerIds.length} selected
+              </span>
+            </div>
+
             {filteredBills.map(bill => (
-              <Card key={bill.customerId} className="p-4 space-y-3">
+              <Card key={bill.customerId} className={`p-4 space-y-3 transition-colors ${selectedCustomerIds.includes(bill.customerId) ? 'border-sky-400 bg-sky-50/30' : ''}`}>
                 <div className="flex items-start justify-between">
-                  <div>
-                    <h3 className="font-bold text-gray-900 text-base">{bill.customerName}</h3>
-                    <p className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
-                      <Phone className="w-3 h-3 text-gray-400" />
-                      {bill.customerPhone}
-                    </p>
+                  <div className="flex items-start gap-2.5">
+                    <input
+                      type="checkbox"
+                      checked={selectedCustomerIds.includes(bill.customerId)}
+                      onChange={() => toggleSelectCustomer(bill.customerId)}
+                      className="w-4 h-4 rounded text-sky-600 focus:ring-sky-500 cursor-pointer mt-1"
+                    />
+                    <div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <h3 className="font-bold text-gray-900 text-base">{bill.customerName}</h3>
+                        {(() => {
+                          const cust = customerMap.get(bill.customerId);
+                          const days = bill.deliveryDays || cust?.deliveryDays;
+                          if (days && days.length > 0 && days.length < 7) {
+                            return (
+                              <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                                📅 {days.join(', ')}
+                              </span>
+                            );
+                          } else if (days && days.length === 7) {
+                            return (
+                              <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                📅 Daily
+                              </span>
+                            );
+                          }
+                          return null;
+                        })()}
+                      </div>
+                      <p className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
+                        <Phone className="w-3 h-3 text-gray-400" />
+                        {bill.customerPhone}
+                      </p>
+                    </div>
                   </div>
                   <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-sky-100 text-sky-800 rounded-full font-bold text-xs">
                     <Droplets className="w-3 h-3 text-sky-500" />
@@ -509,6 +858,140 @@ export default function MonthlyBills() {
           </div>
         </div>
       )}
+
+      {/* 1-Click WhatsApp Batch Queue Modal */}
+      <Modal
+        isOpen={isQueueModalOpen}
+        onClose={() => setIsQueueModalOpen(false)}
+        title={`🚀 1-Click WhatsApp Bill Dispatch (${queueIndex + 1} of ${selectedBills.length})`}
+        size="md"
+      >
+        {selectedBills[queueIndex] ? (
+          <div className="space-y-4">
+            {/* Progress bar */}
+            <div>
+              <div className="flex items-center justify-between text-xs text-gray-500 font-semibold mb-1">
+                <span>Progress: {queueIndex + 1} of {selectedBills.length} Customers</span>
+                <span>{Math.round(((queueIndex + 1) / selectedBills.length) * 100)}%</span>
+              </div>
+              <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden">
+                <div
+                  className="bg-emerald-600 h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${((queueIndex + 1) / selectedBills.length) * 100}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Current Customer Card */}
+            <div className="p-4 bg-sky-50/70 border border-sky-100 rounded-2xl space-y-2">
+              <div className="flex items-start justify-between">
+                <div>
+                  <h4 className="text-base font-bold text-gray-900">
+                    {selectedBills[queueIndex].customerName}
+                  </h4>
+                  <p className="text-xs text-gray-600 flex items-center gap-1 mt-0.5">
+                    <Phone className="w-3 h-3 text-gray-400" />
+                    <span>{selectedBills[queueIndex].customerPhone || 'Phone number nahi mila'}</span>
+                  </p>
+                </div>
+                <span className="text-xs font-black px-2.5 py-1 bg-sky-100 text-sky-800 rounded-full">
+                  {selectedBills[queueIndex].totalBottles} Bottles
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 pt-2 border-t border-sky-200/60 text-xs">
+                <div>
+                  <span className="text-gray-500 block">Is Mahine Ka Bill:</span>
+                  <span className="font-bold text-gray-900">{sym}{selectedBills[queueIndex].monthCharges.toLocaleString()}</span>
+                </div>
+                <div>
+                  <span className="text-gray-500 block">Kul Baqiya (Net Due):</span>
+                  <span className="font-black text-rose-600">{sym}{selectedBills[queueIndex].netOutstanding.toLocaleString()}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Formatted Message Preview */}
+            <div>
+              <span className="text-xs font-bold text-gray-500 uppercase block mb-1">
+                WhatsApp Message Preview:
+              </span>
+              <pre className="p-3 bg-gray-50 border border-gray-200 rounded-xl text-xs text-gray-700 font-mono whitespace-pre-wrap max-h-36 overflow-y-auto">
+                {formatWhatsAppBillMessage(selectedBills[queueIndex], settings)}
+              </pre>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="space-y-2 pt-2 border-t border-gray-100">
+              <button
+                type="button"
+                onClick={() => {
+                  const bill = selectedBills[queueIndex];
+                  openWhatsAppBill(bill, settings);
+                  if (queueIndex + 1 < selectedBills.length) {
+                    setQueueIndex(q => q + 1);
+                    toast.success(`${bill.customerName} ko send ho gaya! Agla customer load ho gaya.`);
+                  } else {
+                    toast.success('Mubarak! Tamam selected customers ko WhatsApp bills bhej diye gaye!');
+                    setIsQueueModalOpen(false);
+                  }
+                }}
+                className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 active:scale-98 text-white rounded-xl font-black text-sm shadow-md shadow-emerald-600/20 flex items-center justify-center gap-2 transition-all"
+              >
+                <MessageSquare className="w-4 h-4" />
+                <span>
+                  {queueIndex + 1 === selectedBills.length
+                    ? 'WhatsApp Bhejo Aur Finish (Last) 🏁'
+                    : `WhatsApp Bhejo Aur Agla Customer ➡️ (${queueIndex + 2}/${selectedBills.length})`}
+                </span>
+              </button>
+
+              <div className="flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleCopyMessage(selectedBills[queueIndex]);
+                  }}
+                  className="px-3 py-2 text-xs font-bold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-xl flex items-center gap-1.5"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>Copy Text</span>
+                </button>
+
+                <div className="flex items-center gap-2">
+                  {queueIndex > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setQueueIndex(q => q - 1)}
+                      className="px-3 py-2 text-xs font-bold text-gray-600 hover:bg-gray-100 rounded-xl"
+                    >
+                      ⬅️ Pichla
+                    </button>
+                  )}
+                  {queueIndex + 1 < selectedBills.length && (
+                    <button
+                      type="button"
+                      onClick={() => setQueueIndex(q => q + 1)}
+                      className="px-3 py-2 text-xs font-bold text-sky-700 hover:bg-sky-50 rounded-xl"
+                    >
+                      Skip to Next ➡️
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setIsQueueModalOpen(false)}
+                    className="px-3 py-2 text-xs font-bold text-gray-500 hover:bg-gray-100 rounded-xl"
+                  >
+                    Band Karein
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="text-center py-6 text-gray-500">Queue complete!</div>
+        )}
+      </Modal>
     </div>
   );
 }

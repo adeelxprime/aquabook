@@ -11,7 +11,7 @@ import type { Delivery } from '../types';
 import { 
   ArrowLeft, Phone, MapPin, Droplets, Calendar, CreditCard, 
   Truck, MessageSquare, FileDown, Send, CheckCircle2, ChevronLeft, ChevronRight,
-  Plus, Minus, Clock, Sparkles
+  Plus, Minus, Clock, Sparkles, X, Check
 } from 'lucide-react';
 import { format } from 'date-fns';
 import CustomerCalendarGrid from '../components/CustomerCalendarGrid';
@@ -20,7 +20,7 @@ import toast from 'react-hot-toast';
 export default function CustomerDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { customers, settings, addDelivery } = useApp();
+  const { customers, settings, addDelivery, updateDelivery } = useApp();
   const [tab, setTab] = useState<'deliveries' | 'payments' | 'bills'>('deliveries');
 
   // Month selector for billing
@@ -187,6 +187,14 @@ export default function CustomerDetail() {
             <div className="flex items-center gap-3 text-sm"><Phone className="w-4 h-4 text-gray-400" /><span className="text-gray-700 font-medium">{customer.phone}</span></div>
             <div className="flex items-center gap-3 text-sm"><MapPin className="w-4 h-4 text-gray-400" /><span className="text-gray-700">{customer.address}</span></div>
             <div className="flex items-center gap-3 text-sm"><Droplets className="w-4 h-4 text-gray-400" /><span className="text-gray-700">{customer.quantity} × {customer.waterType} @ {fmt(customer.pricePerUnit)}</span></div>
+            <div className="flex items-center gap-3 text-sm">
+              <Calendar className="w-4 h-4 text-sky-500" />
+              <span className="text-gray-700 font-semibold">
+                Schedule: {customer.deliveryDays && customer.deliveryDays.length > 0 
+                  ? (customer.deliveryDays.length === 7 ? 'Daily (7 Days)' : customer.deliveryDays.join(', '))
+                  : 'Daily (7 Days)'}
+              </span>
+            </div>
             <div className="flex items-center gap-3 text-sm"><Calendar className="w-4 h-4 text-gray-400" /><span className="text-gray-700">Added {format(new Date(customer.createdAt), 'PPP')}</span></div>
             {customer.notes && <p className="text-xs text-gray-500 bg-gray-50 rounded-xl p-3 mt-2">{customer.notes}</p>}
           </div>

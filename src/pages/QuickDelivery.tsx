@@ -47,6 +47,45 @@ export default function QuickDelivery() {
     isRiderLoggedIn && loggedInRiderId ? loggedInRiderId : (riderParam || 'all')
   );
 
+  // Day-wise Schedule Filter ('auto', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun', 'all')
+  const selectedDayName = useMemo(() => {
+    try {
+      return format(new Date(selectedDate + 'T00:00:00'), 'EEE');
+    } catch {
+      return 'Mon';
+    }
+  }, [selectedDate]);
+  const [selectedDaySchedule, setSelectedDaySchedule] = useState<string>('auto');
+
+  // Vehicle Stock & Anti-Theft Tracker (Point 6 & Point 8)
+  const [vehicleMode, setVehicleMode] = useState<'regular' | 'bulk'>('regular');
+  const vehicleLoadStorageKey = `aquabook_veh_load_${selectedRiderId || 'all'}_${selectedDate}`;
+  const [vehicleLoadedStock, setVehicleLoadedStock] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem(`aquabook_veh_load_${selectedRiderId || 'all'}_${selectedDate}`);
+      return saved ? Number(saved) : 0;
+    } catch {
+      return 0;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(vehicleLoadStorageKey);
+      setVehicleLoadedStock(saved ? Number(saved) : 0);
+    } catch {
+      setVehicleLoadedStock(0);
+    }
+  }, [vehicleLoadStorageKey]);
+
+  const handleUpdateVehicleLoad = (newVal: number) => {
+    const val = Math.max(0, newVal);
+    setVehicleLoadedStock(val);
+    try {
+      localStorage.setItem(vehicleLoadStorageKey, String(val));
+    } catch {}
+  };
+
   // Active delivery boy info (must be defined before areas and distinctBlocks)
   const selectedRider = useMemo(() => {
     if (selectedRiderId === 'all') return null;
@@ -251,7 +290,15 @@ export default function QuickDelivery() {
       else if (statusTab === 'skipped') matchTab = isSkipped;
       else if (statusTab === 'pending') matchTab = isPending;
 
-      return matchSearch && matchArea && matchBlock && matchTab;
+      // Strict Day-wise Schedule Filter
+      const activeScheduleDay = selectedDaySchedule === 'auto' ? selectedDayName : selectedDaySchedule;
+      const matchesDay = selectedDaySchedule === 'all'
+        ? true
+        : selectedDaySchedule === 'unscheduled'
+        ? (!c.deliveryDays || c.deliveryDays.length === 0)
+        : Boolean(c.deliveryDays && c.deliveryDays.includes(activeScheduleDay));
+
+      return matchSearch && matchArea && matchBlock && matchTab && matchesDay;
     });
 
     // Sequence houses logically by Building -> Floor -> House No
@@ -268,7 +315,7 @@ export default function QuickDelivery() {
     });
 
     return list;
-  }, [customers, search, areaFilter, blockFilter, statusTab, selectedRiderId, selectedRider, todayDeliveriesMap]);
+  }, [customers, search, areaFilter, blockFilter, statusTab, selectedRiderId, selectedRider, todayDeliveriesMap, selectedDaySchedule, selectedDayName]);
 
   // Pending customers on current filtered route
   const pendingCustomers = useMemo(() => {
@@ -626,7 +673,8 @@ export default function QuickDelivery() {
   // Route statistics for selected date (strictly scoped to this rider if logged in or selected)
   const activeRiderId = isRiderLoggedIn ? loggedInRiderId : (selectedRiderId !== 'all' ? selectedRiderId : null);
 
-  const routeTargetCustomers = useMemo(() => {
+  // Active customers assigned to or reachable by current rider/owner
+  const scopedActiveCustomers = useMemo(() => {
     if (!activeRiderId) {
       return customers.filter(c => c.status === 'active');
     }
@@ -644,6 +692,15 @@ export default function QuickDelivery() {
       return false;
     });
   }, [customers, activeRiderId, deliveryBoys]);
+
+  const routeTargetCustomers = useMemo(() => {
+    const activeScheduleDay = selectedDaySchedule === 'auto' ? selectedDayName : selectedDaySchedule;
+    return scopedActiveCustomers.filter(c => {
+      if (selectedDaySchedule === 'all') return true;
+      if (selectedDaySchedule === 'unscheduled') return !c.deliveryDays || c.deliveryDays.length === 0;
+      return Boolean(c.deliveryDays && c.deliveryDays.includes(activeScheduleDay));
+    });
+  }, [scopedActiveCustomers, selectedDaySchedule, selectedDayName]);
 
   const routeCustomerIds = useMemo(() => new Set(routeTargetCustomers.map(c => c.id)), [routeTargetCustomers]);
 
@@ -904,8 +961,261 @@ export default function QuickDelivery() {
         </Card>
       </div>
 
+      {/* VEHICLE STOCK & LIVE THEFT CONTROL (Zero Theft & Truck / Container / Tanker Mode) */}
+      <Card className="p-4 bg-gradient-to-br from-slate-900 via-sky-950 to-blue-950 text-white shadow-md border-sky-800/40">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-white/10">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-sky-500/20 border border-sky-400/30 flex items-center justify-center text-sky-400 shrink-0">
+              {vehicleMode === 'bulk' ? <Truck className="w-5 h-5 text-amber-300" /> : <Bike className="w-5 h-5 text-sky-300" />}
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-sky-400/20 text-sky-300 border border-sky-400/30">
+                  {vehicleMode === 'bulk' ? 'Commercial Bulk Truck / Container Mode' : 'Loader / Rickshaw Supply Mode'}
+                </span>
+                <span className="text-xs text-slate-300">
+                  {selectedRider ? `Rider: ${selectedRider.name}` : 'All Vehicles / Plant Master'}
+                </span>
+              </div>
+              <h3 className="text-sm sm:text-base font-black text-white mt-0.5 flex items-center gap-1.5">
+                <span>Gadi Stock & Live Chori Roktam Tracker</span>
+                {vehicleLoadedStock > 0 && totalBottlesToday <= vehicleLoadedStock && (
+                  <span className="text-[11px] font-bold text-emerald-300 bg-emerald-950/80 border border-emerald-500/40 px-2 py-0.2 rounded-full flex items-center gap-1">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Zero Theft Verified</span>
+                  </span>
+                )}
+              </h3>
+            </div>
+          </div>
+
+          {/* Mode Switcher: Loader/Rickshaw vs Truck/Container (Point 6) */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setVehicleMode('regular')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                vehicleMode === 'regular'
+                  ? 'bg-sky-500 text-white shadow-xs'
+                  : 'bg-white/10 hover:bg-white/20 text-slate-300'
+              }`}
+            >
+              <Bike className="w-3.5 h-3.5" />
+              <span>Gharon Ki Supply (Loader)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setVehicleMode('bulk')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                vehicleMode === 'bulk'
+                  ? 'bg-amber-500 text-amber-950 shadow-xs'
+                  : 'bg-white/10 hover:bg-white/20 text-slate-300'
+              }`}
+            >
+              <Truck className="w-3.5 h-3.5" />
+              <span>Plaza / Bulk Supply (Truck)</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Live Metrics Row: Loaded, Delivered, Remaining, Empty Returned */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3.5">
+          {/* Loaded in Vehicle Input */}
+          <div className="p-3 bg-white/5 border border-white/10 rounded-xl">
+            <span className="text-[11px] text-sky-200 block font-semibold uppercase">
+              {vehicleMode === 'bulk' ? 'Truck / Tanker Load' : 'Gadi Me Bhari Botlein'}
+            </span>
+            <div className="flex items-center gap-2 mt-1">
+              <input
+                type="number"
+                min="0"
+                value={vehicleLoadedStock || ''}
+                onChange={e => handleUpdateVehicleLoad(Number(e.target.value) || 0)}
+                placeholder="0"
+                className="w-20 px-2 py-1 bg-white/15 border border-white/20 rounded-lg text-lg font-black text-white focus:outline-none focus:ring-2 focus:ring-sky-400"
+              />
+              <div className="flex flex-col gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => handleUpdateVehicleLoad(vehicleLoadedStock + (vehicleMode === 'bulk' ? 50 : 10))}
+                  className="px-1.5 py-0.5 bg-white/10 hover:bg-white/20 rounded text-[10px] font-bold text-sky-200"
+                >
+                  +{vehicleMode === 'bulk' ? 50 : 10}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleUpdateVehicleLoad(Math.max(0, vehicleLoadedStock - (vehicleMode === 'bulk' ? 50 : 10)))}
+                  className="px-1.5 py-0.5 bg-white/10 hover:bg-white/20 rounded text-[10px] font-bold text-sky-200"
+                >
+                  -{vehicleMode === 'bulk' ? 50 : 10}
+                </button>
+              </div>
+            </div>
+            <span className="text-[10px] text-slate-400 mt-1 block">Subha plant se nikli botlein</span>
+          </div>
+
+          {/* Delivered Count */}
+          <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
+            <span className="text-[11px] text-emerald-300 block font-semibold uppercase">
+              Deliver Ho Gayi (✅)
+            </span>
+            <p className="text-2xl font-black text-emerald-400 mt-1">{totalBottlesToday}</p>
+            <span className="text-[10px] text-emerald-200/70 mt-1 block">
+              {deliveredCount} gharon me deliver hua
+            </span>
+          </div>
+
+          {/* Remaining in Vehicle */}
+          <div className="p-3 bg-white/5 border border-white/10 rounded-xl">
+            <span className="text-[11px] text-amber-300 block font-semibold uppercase">
+              Gadi Me Baqi Stock
+            </span>
+            <p className="text-2xl font-black text-amber-400 mt-1">
+              {vehicleLoadedStock > 0 ? Math.max(0, vehicleLoadedStock - totalBottlesToday) : '—'}
+            </p>
+            <span className="text-[10px] text-slate-400 mt-1 block">
+              {vehicleLoadedStock > 0 && totalBottlesToday > vehicleLoadedStock ? (
+                <span className="text-rose-400 font-bold">⚠️ Extra deliver ho gayi!</span>
+              ) : (
+                'Gadi me abhi mojud botlein'
+              )}
+            </span>
+          </div>
+
+          {/* Empty Cans Collected */}
+          <div className="p-3 bg-white/5 border border-white/10 rounded-xl">
+            <span className="text-[11px] text-sky-300 block font-semibold uppercase">
+              Khali Can Wapis Mile (🔄)
+            </span>
+            <p className="text-2xl font-black text-sky-400 mt-1">
+              {deliveredList.reduce((sum, d) => sum + (d.emptyBottlesReceived || 0), 0)}
+            </p>
+            <span className="text-[10px] text-slate-400 mt-1 block">
+              Baqi Can Udhar: {Math.max(0, totalBottlesToday - deliveredList.reduce((sum, d) => sum + (d.emptyBottlesReceived || 0), 0))}
+            </span>
+          </div>
+        </div>
+
+        {/* Live Reconcile Status Footnote */}
+        <div className="mt-3 pt-2.5 border-t border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+          <div className="flex items-center gap-2 text-slate-300">
+            <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>
+              {vehicleLoadedStock === 0
+                ? 'Tip: Subha gadi ka loaded stock enter karein taake wapsi par chori aur baqi stock 100% match ho.'
+                : vehicleLoadedStock >= totalBottlesToday
+                ? `Plant Hisab: Gadi me ${vehicleLoadedStock} botlein thin, ${totalBottlesToday} deliver huin, ${vehicleLoadedStock - totalBottlesToday} bachi hui wapis aani chahiye.`
+                : `Dhyan Dein: Deliveries (${totalBottlesToday}) loaded stock (${vehicleLoadedStock}) se zyada hain.`}
+            </span>
+          </div>
+          {vehicleLoadedStock > 0 && (
+            <button
+              type="button"
+              onClick={() => handleUpdateVehicleLoad(0)}
+              className="text-[11px] text-slate-400 hover:text-white underline self-start sm:self-auto"
+            >
+              Reset Stock
+            </button>
+          )}
+        </div>
+      </Card>
+
       {/* Route & Area Filter Bar */}
       <Card className="p-3.5">
+        {/* Day-Wise Customer Schedule Selector (Mon - Sun) */}
+        <div className="mb-3 pb-3 border-b border-gray-100">
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+            <span className="text-xs font-bold text-gray-700 flex items-center gap-1.5 whitespace-nowrap mr-1">
+              <Calendar className="w-4 h-4 text-sky-600" />
+              <span>Delivery Din (Schedule):</span>
+            </span>
+
+            {/* Aaj Ka Din (Auto) */}
+            <button
+              type="button"
+              onClick={() => setSelectedDaySchedule('auto')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 ${
+                selectedDaySchedule === 'auto'
+                  ? 'bg-sky-600 text-white shadow-xs'
+                  : 'bg-sky-50 text-sky-800 border border-sky-200 hover:bg-sky-100'
+              }`}
+            >
+              <Zap className="w-3 h-3 text-amber-400" />
+              <span>Aaj ({selectedDayName})</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
+                selectedDaySchedule === 'auto' ? 'bg-white/20 text-white' : 'bg-sky-200 text-sky-900'
+              }`}>
+                {scopedActiveCustomers.filter(c => c.deliveryDays?.includes(selectedDayName)).length}
+              </span>
+            </button>
+
+            {/* Mon - Sun */}
+            {(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const).map(day => {
+              const dayCount = scopedActiveCustomers.filter(c => c.deliveryDays?.includes(day)).length;
+              const isSelected = selectedDaySchedule === day;
+              const isToday = selectedDayName === day;
+              return (
+                <button
+                  key={day}
+                  type="button"
+                  onClick={() => setSelectedDaySchedule(day)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 ${
+                    isSelected
+                      ? 'bg-sky-600 text-white shadow-xs'
+                      : isToday
+                      ? 'bg-sky-50/80 text-sky-700 border border-sky-300 hover:bg-sky-100'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  <span>{day}</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
+                    isSelected ? 'bg-white/20 text-white' : 'bg-gray-200 text-gray-800'
+                  }`}>
+                    {dayCount}
+                  </span>
+                </button>
+              );
+            })}
+
+            {/* Sab Din */}
+            <button
+              type="button"
+              onClick={() => setSelectedDaySchedule('all')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 ${
+                selectedDaySchedule === 'all'
+                  ? 'bg-sky-600 text-white shadow-xs'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              <span>Sab Din</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
+                selectedDaySchedule === 'all' ? 'bg-white/20 text-white' : 'bg-gray-200 text-gray-800'
+              }`}>
+                {scopedActiveCustomers.length}
+              </span>
+            </button>
+
+            {/* Schedule Baqi (Unscheduled legacy customers) */}
+            {scopedActiveCustomers.some(c => !c.deliveryDays || c.deliveryDays.length === 0) && (
+              <button
+                type="button"
+                onClick={() => setSelectedDaySchedule('unscheduled')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 ${
+                  selectedDaySchedule === 'unscheduled'
+                    ? 'bg-amber-600 text-white shadow-xs'
+                    : 'bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200'
+                }`}
+              >
+                <span>Schedule Baqi</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
+                  selectedDaySchedule === 'unscheduled' ? 'bg-white/20 text-white' : 'bg-amber-200 text-amber-900'
+                }`}>
+                  {scopedActiveCustomers.filter(c => !c.deliveryDays || c.deliveryDays.length === 0).length}
+                </span>
+              </button>
+            )}
+          </div>
+        </div>
         <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
           <div className="flex-1">
             <SearchInput
@@ -1180,6 +1490,17 @@ export default function QuickDelivery() {
                           {customer.area && !customer.block && (
                             <span className="text-[10px] bg-sky-100 text-sky-700 font-semibold px-2 py-0.5 rounded-md">
                               {customer.area}
+                            </span>
+                          )}
+                          {customer.deliveryDays && customer.deliveryDays.length > 0 ? (
+                            <span className="text-[10px] bg-sky-50 text-sky-700 border border-sky-200 font-bold px-2 py-0.5 rounded-md flex items-center gap-1">
+                              <Calendar className="w-2.5 h-2.5 text-sky-600" />
+                              <span>{customer.deliveryDays.length === 7 ? 'Har Din' : customer.deliveryDays.join(', ')}</span>
+                            </span>
+                          ) : (
+                            <span className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200 font-semibold px-2 py-0.5 rounded-md flex items-center gap-1">
+                              <Calendar className="w-2.5 h-2.5 text-amber-600" />
+                              <span>Schedule Baqi</span>
                             </span>
                           )}
                         </div>

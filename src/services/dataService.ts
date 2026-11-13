@@ -565,6 +565,7 @@ export function getCustomerMonthlyBill(customerId: string, monthStr: string): Cu
     customerPhone: customer.phone,
     customerAddress: customer.address,
     area: customer.area,
+    deliveryDays: customer.deliveryDays,
     month: monthStr,
     monthStr: monthStr,
     monthName,

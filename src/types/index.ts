@@ -8,6 +8,7 @@ export interface Customer {
   building?: string; // Building / Plaza / Street Name (e.g. Building 12, Street 4)
   floor?: string; // Floor / Apartment (e.g. Floor 2, Flat 3B)
   houseNo?: string; // House Number (e.g. House # 14)
+  deliveryDays?: string[]; // Scheduled days e.g. ['Mon', 'Thu'] or ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
   waterType: string;
   quantity: number; // default daily bottles
   pricePerUnit: number;
@@ -155,6 +156,7 @@ export interface CustomerMonthlyBill {
   customerPhone: string;
   customerAddress: string;
   area?: string;
+  deliveryDays?: string[];
   month: string; // YYYY-MM
   monthStr?: string; // YYYY-MM alias for backwards compatibility
   monthName: string;

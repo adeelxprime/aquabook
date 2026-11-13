@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { PageHeader, Card, Button, SearchInput, Modal, ConfirmDialog, FormInput, FormSelect, FormTextarea, StatusBadge, EmptyState } from '../components/ui';
-import { Users, Plus, Edit, Trash2, Eye, Phone, MapPin, RefreshCw } from 'lucide-react';
+import { Users, Plus, Edit, Trash2, Eye, Phone, MapPin, RefreshCw, Calendar } from 'lucide-react';
 import { format } from 'date-fns';
 import { getDeliveriesByCustomer } from '../services/dataService';
 import { getAuth } from '../services/adminService';
@@ -22,6 +22,7 @@ export default function Customers() {
   const [editingCustomer, setEditingCustomer] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [selectedBlock, setSelectedBlock] = useState('all');
+  const [selectedDayFilter, setSelectedDayFilter] = useState<'all' | 'Mon' | 'Tue' | 'Wed' | 'Thu' | 'Fri' | 'Sat' | 'Sun' | 'unscheduled'>('all');
 
   const auth = getAuth();
   const isDeliveryBoy = auth.userType === 'delivery_boy';
@@ -30,6 +31,7 @@ export default function Customers() {
   const [form, setForm] = useState({
     name: '', phone: '', address: '', area: '', 
     block: '', building: '', floor: '', houseNo: '',
+    deliveryDays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as string[],
     waterType: 'Regular',
     quantity: 1, pricePerUnit: settings.defaultWaterPrice,
     status: 'active' as 'active' | 'inactive', 
@@ -57,7 +59,15 @@ export default function Customers() {
         (c.building && c.building.toLowerCase().includes(search.toLowerCase()));
       const matchFilter = filter === 'all' || c.status === filter;
       const matchBlock = selectedBlock === 'all' || c.block === selectedBlock;
-      return matchSearch && matchFilter && matchBlock;
+
+      // Strict Day-wise Schedule Match
+      const matchDay = selectedDayFilter === 'all'
+        ? true
+        : selectedDayFilter === 'unscheduled'
+        ? (!c.deliveryDays || c.deliveryDays.length === 0)
+        : Boolean(c.deliveryDays && c.deliveryDays.includes(selectedDayFilter));
+
+      return matchSearch && matchFilter && matchBlock && matchDay;
     });
 
     list.sort((a, b) => {
@@ -70,7 +80,7 @@ export default function Customers() {
       }
     });
     return list;
-  }, [customers, search, filter, selectedBlock, sort, getCustomerBalance]);
+  }, [customers, search, filter, selectedBlock, selectedDayFilter, sort, getCustomerBalance]);
 
   const fmt = (v: number) => `${settings.currencySymbol}${v.toLocaleString()}`;
 
@@ -83,6 +93,9 @@ export default function Customers() {
     setForm({ 
       name: '', phone: '', address: '', area: '', 
       block: '', building: '', floor: '', houseNo: '',
+      deliveryDays: (selectedDayFilter !== 'all' && selectedDayFilter !== 'unscheduled')
+        ? [selectedDayFilter]
+        : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
       waterType: 'Regular', 
       quantity: 1, pricePerUnit: settings.defaultWaterPrice, status: 'active', 
       assignedDeliveryBoyId: '', assignedDeliveryBoyName: '', notes: '' 
@@ -102,6 +115,7 @@ export default function Customers() {
     setForm({ 
       name: c.name, phone: c.phone, address: c.address, area: c.area || '', 
       block: c.block || '', building: c.building || '', floor: c.floor || '', houseNo: c.houseNo || '',
+      deliveryDays: c.deliveryDays && c.deliveryDays.length > 0 ? c.deliveryDays : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
       waterType: c.waterType, quantity: c.quantity, pricePerUnit: c.pricePerUnit, 
       status: c.status, assignedDeliveryBoyId: c.assignedDeliveryBoyId || '', 
       assignedDeliveryBoyName: c.assignedDeliveryBoyName || '', notes: c.notes || '' 
@@ -194,6 +208,21 @@ export default function Customers() {
               ))}
             </select>
           )}
+          <select 
+            value={selectedDayFilter} 
+            onChange={(e) => setSelectedDayFilter(e.target.value as any)} 
+            className="px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-semibold text-gray-700 focus:outline-none focus:ring-2 focus:ring-sky-500/20"
+          >
+            <option value="all">📅 Sab Din ({customers.length})</option>
+            <option value="Mon">Mon (Monday)</option>
+            <option value="Tue">Tue (Tuesday)</option>
+            <option value="Wed">Wed (Wednesday)</option>
+            <option value="Thu">Thu (Thursday)</option>
+            <option value="Fri">Fri (Friday)</option>
+            <option value="Sat">Sat (Saturday)</option>
+            <option value="Sun">Sun (Sunday)</option>
+            <option value="unscheduled">⚠️ Schedule Baqi</option>
+          </select>
           <select value={filter} onChange={(e) => setFilter(e.target.value as any)} className="px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/20">
             <option value="all">All Status</option>
             <option value="active">Active</option>
@@ -206,6 +235,76 @@ export default function Customers() {
             <option value="name_desc">Name Z-A</option>
             <option value="balance">Balance ↓</option>
           </select>
+        </div>
+      </div>
+
+      {/* Day-Wise Schedule 1-Click Filter Chips Bar */}
+      <div className="bg-white p-2.5 sm:p-3 rounded-2xl border border-gray-200/80 shadow-2xs">
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+          <span className="text-xs font-bold text-gray-700 flex items-center gap-1.5 whitespace-nowrap px-1 mr-1">
+            <Calendar className="w-4 h-4 text-sky-600" />
+            <span>Din Ka Schedule:</span>
+          </span>
+
+          <button
+            type="button"
+            onClick={() => setSelectedDayFilter('all')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 ${
+              selectedDayFilter === 'all'
+                ? 'bg-sky-600 text-white shadow-xs'
+                : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+            }`}
+          >
+            <span>Sab Din</span>
+            <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
+              selectedDayFilter === 'all' ? 'bg-white/20 text-white' : 'bg-gray-200 text-gray-700'
+            }`}>
+              {customers.length}
+            </span>
+          </button>
+
+          {(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const).map(day => {
+            const dayCount = customers.filter(c => c.deliveryDays?.includes(day)).length;
+            const isCurrent = selectedDayFilter === day;
+            return (
+              <button
+                key={day}
+                type="button"
+                onClick={() => setSelectedDayFilter(day)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 ${
+                  isCurrent
+                    ? 'bg-sky-600 text-white shadow-xs'
+                    : 'bg-sky-50/70 hover:bg-sky-100 text-sky-900 border border-sky-100'
+                }`}
+              >
+                <span>{day}</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
+                  isCurrent ? 'bg-white/20 text-white' : 'bg-sky-200/70 text-sky-900'
+                }`}>
+                  {dayCount}
+                </span>
+              </button>
+            );
+          })}
+
+          {customers.some(c => !c.deliveryDays || c.deliveryDays.length === 0) && (
+            <button
+              type="button"
+              onClick={() => setSelectedDayFilter('unscheduled')}
+              className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 ${
+                selectedDayFilter === 'unscheduled'
+                  ? 'bg-amber-600 text-white shadow-xs'
+                  : 'bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200'
+              }`}
+            >
+              <span>Schedule Baqi</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
+                selectedDayFilter === 'unscheduled' ? 'bg-white/20 text-white' : 'bg-amber-200 text-amber-900'
+              }`}>
+                {customers.filter(c => !c.deliveryDays || c.deliveryDays.length === 0).length}
+              </span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -277,8 +376,23 @@ export default function Customers() {
                             </div>
                           </td>
                           <td className="px-5 py-4 text-sm">
-                            <div>{c.quantity} × {c.waterType}</div>
+                            <div className="font-medium text-gray-900">{c.quantity} × {c.waterType}</div>
                             <div className="text-xs text-gray-400">@ {fmt(c.pricePerUnit)}</div>
+                            <div className="mt-1">
+                              {c.deliveryDays && c.deliveryDays.length > 0 && c.deliveryDays.length < 7 ? (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                                  📅 {c.deliveryDays.join(', ')}
+                                </span>
+                              ) : c.deliveryDays && c.deliveryDays.length === 7 ? (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                  📅 Daily
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-100 text-gray-500">
+                                  ⚠️ No Schedule
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td className="px-5 py-4">
                             <span className={`text-sm font-semibold ${balance.outstandingBalance > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
@@ -343,7 +457,24 @@ export default function Customers() {
                     </div>
                   </div>
                   <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-50">
-                    <span className="text-xs text-gray-400">{c.quantity} × {c.waterType} @ {fmt(c.pricePerUnit)}</span>
+                    <div className="space-y-0.5">
+                      <div className="text-xs text-gray-500 font-medium">{c.quantity} × {c.waterType} @ {fmt(c.pricePerUnit)}</div>
+                      <div>
+                        {c.deliveryDays && c.deliveryDays.length > 0 && c.deliveryDays.length < 7 ? (
+                          <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                            📅 {c.deliveryDays.join(', ')}
+                          </span>
+                        ) : c.deliveryDays && c.deliveryDays.length === 7 ? (
+                          <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                            📅 Daily
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-semibold bg-gray-100 text-gray-500">
+                            ⚠️ No Schedule
+                          </span>
+                        )}
+                      </div>
+                    </div>
                     <span className="text-xs text-gray-400">{lastDel ? format(new Date(lastDel.date), 'MMM d') : 'No deliveries'}</span>
                   </div>
                   {!isDeliveryBoy && (
@@ -398,6 +529,79 @@ export default function Customers() {
             </div>
             <p className="text-[11px] text-sky-700">
               Delivery boy route par block ke hisab se ghar-ba-ghar asani se deliver karega.
+            </p>
+          </div>
+
+          {/* Day-Wise Customer Schedule Selection */}
+          <div className="p-3.5 bg-gradient-to-r from-sky-50/80 via-blue-50/80 to-indigo-50/80 border border-sky-200/90 rounded-2xl space-y-2.5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+              <span className="text-xs font-bold text-sky-900 uppercase tracking-wider flex items-center gap-1.5">
+                <Calendar className="w-3.5 h-3.5 text-sky-600" />
+                <span>Day-Wise Schedule (Hafte Ke Din)</span>
+              </span>
+              <div className="flex items-center gap-1.5 text-[11px] font-bold flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => setForm(f => ({ ...f, deliveryDays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] }))}
+                  className="px-2 py-0.5 bg-white text-sky-700 hover:bg-sky-100 rounded border border-sky-200 transition-colors"
+                >
+                  Daily (7 Din)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setForm(f => ({ ...f, deliveryDays: ['Mon', 'Wed', 'Fri'] }))}
+                  className="px-2 py-0.5 bg-white text-sky-700 hover:bg-sky-100 rounded border border-sky-200 transition-colors"
+                >
+                  Mon/Wed/Fri
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setForm(f => ({ ...f, deliveryDays: ['Tue', 'Thu', 'Sat'] }))}
+                  className="px-2 py-0.5 bg-white text-sky-700 hover:bg-sky-100 rounded border border-sky-200 transition-colors"
+                >
+                  Tue/Thu/Sat
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setForm(f => ({ ...f, deliveryDays: [] }))}
+                  className="px-2 py-0.5 bg-white text-rose-700 hover:bg-rose-100 rounded border border-rose-200 transition-colors"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-7 gap-1 sm:gap-2">
+              {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => {
+                const isSelected = form.deliveryDays?.includes(day);
+                return (
+                  <button
+                    key={day}
+                    type="button"
+                    onClick={() => {
+                      setForm(f => {
+                        const currentDays = f.deliveryDays || [];
+                        const exists = currentDays.includes(day);
+                        const next = exists ? currentDays.filter(d => d !== day) : [...currentDays, day];
+                        return { ...f, deliveryDays: next };
+                      });
+                    }}
+                    className={`py-2 text-xs font-bold rounded-xl border transition-all text-center ${
+                      isSelected
+                        ? 'bg-sky-600 text-white border-sky-600 shadow-xs'
+                        : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                    }`}
+                  >
+                    {day}
+                  </button>
+                );
+              })}
+            </div>
+
+            <p className="text-[11px] text-sky-800">
+              {(!form.deliveryDays || form.deliveryDays.length === 7 || form.deliveryDays.length === 0)
+                ? 'Har roz (Daily 7 Days) delivery route par aayega.'
+                : `Sirf in dinon me route par aayega: ${form.deliveryDays.join(', ')}`}
             </p>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

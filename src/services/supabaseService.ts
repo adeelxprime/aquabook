@@ -138,20 +138,37 @@ export async function fetchCustomersFromSupabase(businessId: string): Promise<Cu
 
     if (!rows) return null;
 
-    return rows.map((row: any) => ({
-      id: String(row.id),
-      name: row.name || row.customer_name || 'Customer',
-      phone: row.phone || row.phone_number || row.mobile || '',
-      address: row.address || '',
-      area: row.area || '',
-      waterType: row.water_type || row.waterType || 'Regular Jar',
-      quantity: Number(row.quantity || 1),
-      pricePerUnit: Number(row.price_per_unit || row.pricePerUnit || row.price || 100),
-      status: (row.status || 'active').toLowerCase() === 'inactive' ? 'inactive' : 'active',
-      notes: row.notes || '',
-      createdAt: row.created_at || row.createdAt || new Date().toISOString(),
-      updatedAt: row.updated_at || row.updatedAt || row.created_at || new Date().toISOString(),
-    }));
+    return rows.map((row: any) => {
+      let days = Array.isArray(row.delivery_days || row.deliveryDays) ? (row.delivery_days || row.deliveryDays) : undefined;
+      let rawNotes = String(row.notes || '');
+      const daysMatch = rawNotes.match(/\[DAYS:([A-Za-z,]+)\]/);
+      if (daysMatch && daysMatch[1]) {
+        days = daysMatch[1].split(',').map((d: string) => d.trim()).filter(Boolean);
+        rawNotes = rawNotes.replace(/\[DAYS:[A-Za-z,]+\]/g, '').trim();
+      }
+
+      return {
+        id: String(row.id),
+        name: row.name || row.customer_name || 'Customer',
+        phone: row.phone || row.phone_number || row.mobile || '',
+        address: row.address || '',
+        area: row.area || '',
+        block: row.block || '',
+        building: row.building || '',
+        floor: row.floor || '',
+        houseNo: row.house_no || row.houseNo || '',
+        assignedDeliveryBoyId: row.assigned_delivery_boy_id || row.assignedDeliveryBoyId || '',
+        assignedDeliveryBoyName: row.assigned_delivery_boy_name || row.assignedDeliveryBoyName || '',
+        deliveryDays: days,
+        waterType: row.water_type || row.waterType || 'Regular Jar',
+        quantity: Number(row.quantity || 1),
+        pricePerUnit: Number(row.price_per_unit || row.pricePerUnit || row.price || 100),
+        status: (row.status || 'active').toLowerCase() === 'inactive' ? 'inactive' : 'active',
+        notes: rawNotes,
+        createdAt: row.created_at || row.createdAt || new Date().toISOString(),
+        updatedAt: row.updated_at || row.updatedAt || row.created_at || new Date().toISOString(),
+      };
+    });
   } catch (err) {
     console.warn('Supabase fetch customers exception:', err);
     return null;
@@ -163,6 +180,11 @@ export async function upsertCustomerToSupabase(businessId: string, c: Customer):
   if (!client || !isSupabaseConfigured()) return false;
 
   try {
+    let notes = (c.notes || '').replace(/\[DAYS:[A-Za-z,]+\]/g, '').trim();
+    if (c.deliveryDays && c.deliveryDays.length > 0 && c.deliveryDays.length < 7) {
+      notes = notes ? `${notes} [DAYS:${c.deliveryDays.join(',')}]` : `[DAYS:${c.deliveryDays.join(',')}]`;
+    }
+
     const row = {
       id: c.id,
       business_id: businessId,
@@ -174,7 +196,7 @@ export async function upsertCustomerToSupabase(businessId: string, c: Customer):
       quantity: c.quantity,
       price_per_unit: c.pricePerUnit,
       status: c.status,
-      notes: c.notes,
+      notes,
       updated_at: new Date().toISOString(),
     };
 
