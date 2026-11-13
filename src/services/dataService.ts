@@ -1096,7 +1096,30 @@ export function generateMonthlyBillPdf(bill: CustomerMonthlyBill, settings: Sett
 // ==================== ROUTE DISPATCH & NOTIFICATIONS ====================
 
 export function getRouteDispatches(): RouteDispatchRecord[] {
-  return getFromStorage<RouteDispatchRecord>(getKey('route_dispatches'), []);
+  const scopedKey = getKey('route_dispatches');
+  const scoped = getFromStorage<RouteDispatchRecord>(scopedKey, []);
+  const legacy = getFromStorage<RouteDispatchRecord>('aquabook_route_dispatches', []);
+
+  const extra: RouteDispatchRecord[] = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('aquabook_route_dispatches_') && k !== scopedKey) {
+        const raw = localStorage.getItem(k);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) extra.push(...parsed);
+        }
+      }
+    }
+  } catch {}
+
+  const map = new Map<string, RouteDispatchRecord>();
+  extra.forEach(d => map.set(d.id, d));
+  legacy.forEach(d => map.set(d.id, d));
+  scoped.forEach(d => map.set(d.id, d));
+
+  return Array.from(map.values()).sort((a, b) => new Date(b.dispatchedAt).getTime() - new Date(a.dispatchedAt).getTime());
 }
 
 export function saveRouteDispatch(
@@ -1113,6 +1136,9 @@ export function saveRouteDispatch(
     riderName: dispatch.riderName,
     riderPhone: dispatch.riderPhone,
     areaOrBlock: dispatch.areaOrBlock,
+    targetType: dispatch.targetType,
+    targetValue: dispatch.targetValue,
+    customerIds: dispatch.customerIds,
     customerCount: dispatch.customerCount,
     bottleCount: dispatch.bottleCount,
     message: dispatch.message || '',
@@ -1122,23 +1148,71 @@ export function saveRouteDispatch(
     dispatchDay: dispatch.dispatchDay,
   };
 
-  // Replace any existing active dispatch for this rider so only current route is active
-  const filtered = list.filter(d => !(d.riderId === dispatch.riderId && d.status === 'active'));
+  // Replace any existing active/in_progress dispatch for this rider so only current route is active
+  const filtered = list.filter(d => !(d.riderId === dispatch.riderId && (d.status === 'active' || d.status === 'in_progress' || d.status === 'acknowledged')));
   filtered.unshift(newRecord);
+
+  // Dual-write to scoped key and global keys
   saveToStorage(getKey('route_dispatches'), filtered);
+  try {
+    localStorage.setItem('aquabook_route_dispatches', JSON.stringify(filtered));
+    if (currentBusinessId) {
+      localStorage.setItem(`aquabook_route_dispatches_${currentBusinessId}`, JSON.stringify(filtered));
+    }
+    window.dispatchEvent(new CustomEvent('aquabook_route_dispatched', { detail: newRecord }));
+    window.dispatchEvent(new Event('storage'));
+  } catch {}
+
   return newRecord;
 }
 
 export function acknowledgeRouteDispatch(dispatchId: string): void {
   const list = getRouteDispatches();
   const updated = list.map(d =>
-    d.id === dispatchId ? { ...d, status: 'acknowledged' as const } : d
+    d.id === dispatchId ? { ...d, status: 'in_progress' as const } : d
   );
   saveToStorage(getKey('route_dispatches'), updated);
+  try {
+    localStorage.setItem('aquabook_route_dispatches', JSON.stringify(updated));
+    if (currentBusinessId) {
+      localStorage.setItem(`aquabook_route_dispatches_${currentBusinessId}`, JSON.stringify(updated));
+    }
+    window.dispatchEvent(new CustomEvent('aquabook_route_updated', { detail: { id: dispatchId, status: 'in_progress' } }));
+    window.dispatchEvent(new Event('storage'));
+  } catch {}
+}
+
+export function completeRouteDispatch(dispatchId: string): void {
+  const list = getRouteDispatches();
+  const updated = list.map(d =>
+    d.id === dispatchId ? { ...d, status: 'completed' as const } : d
+  );
+  saveToStorage(getKey('route_dispatches'), updated);
+  try {
+    localStorage.setItem('aquabook_route_dispatches', JSON.stringify(updated));
+    if (currentBusinessId) {
+      localStorage.setItem(`aquabook_route_dispatches_${currentBusinessId}`, JSON.stringify(updated));
+    }
+    window.dispatchEvent(new CustomEvent('aquabook_route_updated', { detail: { id: dispatchId, status: 'completed' } }));
+    window.dispatchEvent(new Event('storage'));
+  } catch {}
 }
 
 export function getActiveRouteDispatchForRider(riderId: string): RouteDispatchRecord | null {
+  if (!riderId) return null;
   const list = getRouteDispatches();
-  return list.find(d => d.riderId === riderId && d.status === 'active') || null;
+  const todayStr = new Date().toISOString().slice(0, 10);
+
+  const nonCompleted = list.filter(d => 
+    d.riderId === riderId && 
+    (d.status === 'active' || d.status === 'in_progress' || d.status === 'acknowledged')
+  );
+
+  if (nonCompleted.length === 0) return null;
+
+  const todayMatch = nonCompleted.find(d => d.dispatchedAt && d.dispatchedAt.slice(0, 10) === todayStr);
+  if (todayMatch) return todayMatch;
+
+  return nonCompleted[0];
 }
 

@@ -167,13 +167,16 @@ export default function DeliveryBoys() {
 
   const handleSendWhatsAppNotification = () => {
     if (!dispatchBoy) return;
-    const { count, bottles, routeLabel } = dispatchRouteMetrics;
+    const { count, bottles, routeLabel, matchedCustomers } = dispatchRouteMetrics;
 
     dispatchRouteToRider({
       riderId: dispatchBoy.id,
       riderName: dispatchBoy.name,
       riderPhone: dispatchBoy.phone,
       areaOrBlock: routeLabel || 'Route',
+      targetType: selectedRouteTarget === 'all_assigned' ? 'all_assigned' : (availableBlocks.includes(selectedRouteTarget) ? 'block' : 'area'),
+      targetValue: selectedRouteTarget,
+      customerIds: matchedCustomers.map(c => c.id),
       customerCount: count,
       bottleCount: bottles,
       message: customRouteNote.trim(),
@@ -193,13 +196,16 @@ export default function DeliveryBoys() {
 
   const handleSendSmsNotification = () => {
     if (!dispatchBoy) return;
-    const { count, bottles, routeLabel } = dispatchRouteMetrics;
+    const { count, bottles, routeLabel, matchedCustomers } = dispatchRouteMetrics;
 
     dispatchRouteToRider({
       riderId: dispatchBoy.id,
       riderName: dispatchBoy.name,
       riderPhone: dispatchBoy.phone,
       areaOrBlock: routeLabel || 'Route',
+      targetType: selectedRouteTarget === 'all_assigned' ? 'all_assigned' : (availableBlocks.includes(selectedRouteTarget) ? 'block' : 'area'),
+      targetValue: selectedRouteTarget,
+      customerIds: matchedCustomers.map(c => c.id),
       customerCount: count,
       bottleCount: bottles,
       message: customRouteNote.trim(),
@@ -216,13 +222,16 @@ export default function DeliveryBoys() {
 
   const handleSaveInAppNotification = () => {
     if (!dispatchBoy) return;
-    const { count, bottles, routeLabel } = dispatchRouteMetrics;
+    const { count, bottles, routeLabel, matchedCustomers } = dispatchRouteMetrics;
 
     dispatchRouteToRider({
       riderId: dispatchBoy.id,
       riderName: dispatchBoy.name,
       riderPhone: dispatchBoy.phone,
       areaOrBlock: routeLabel || 'Route',
+      targetType: selectedRouteTarget === 'all_assigned' ? 'all_assigned' : (availableBlocks.includes(selectedRouteTarget) ? 'block' : 'area'),
+      targetValue: selectedRouteTarget,
+      customerIds: matchedCustomers.map(c => c.id),
       customerCount: count,
       bottleCount: bottles,
       message: customRouteNote.trim(),

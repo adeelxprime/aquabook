@@ -70,11 +70,14 @@ export interface RouteDispatchRecord {
   riderName: string;
   riderPhone: string;
   areaOrBlock: string;
+  targetType?: 'all_assigned' | 'block' | 'area';
+  targetValue?: string;
+  customerIds?: string[];
   customerCount: number;
   bottleCount: number;
   message?: string;
   dispatchedAt: string;
-  status: 'active' | 'acknowledged' | 'completed';
+  status: 'active' | 'in_progress' | 'acknowledged' | 'completed';
   dispatchMode?: 'day' | 'block' | 'both';
   dispatchDay?: string;
 }

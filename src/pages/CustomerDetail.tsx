@@ -14,6 +14,7 @@ import {
   Plus, Minus, Clock, Sparkles, X, Check
 } from 'lucide-react';
 import { format } from 'date-fns';
+import { getAuth } from '../services/adminService';
 import CustomerCalendarGrid from '../components/CustomerCalendarGrid';
 import toast from 'react-hot-toast';
 
@@ -22,6 +23,10 @@ export default function CustomerDetail() {
   const navigate = useNavigate();
   const { customers, settings, addDelivery, updateDelivery } = useApp();
   const [tab, setTab] = useState<'deliveries' | 'payments' | 'bills'>('deliveries');
+
+  const auth = getAuth();
+  const isRider = auth.userType === 'delivery_boy';
+  const loggedInRiderId = auth.deliveryBoyId || '';
 
   // Month selector for billing
   const currentMonth = new Date().toISOString().slice(0, 7);
@@ -65,6 +70,20 @@ export default function CustomerDetail() {
     );
   }
 
+  // Strict Rider Isolation: check if this customer belongs to another rider
+  const isOtherRiderCustomer = isRider && customer.assignedDeliveryBoyId && customer.assignedDeliveryBoyId !== loggedInRiderId;
+  if (isOtherRiderCustomer) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center">
+        <h2 className="text-xl font-bold text-gray-900 mb-2">Access Restricted</h2>
+        <p className="text-gray-500 mb-4 text-sm max-w-md">
+          Yeh customer kisi aur delivery boy ke route par hai. Aap sirf apne route ke customers dekh sakte hain.
+        </p>
+        <Button onClick={() => navigate('/quick-delivery')}>Today Route Par Wapis Jayein</Button>
+      </div>
+    );
+  }
+
   const methodLabel: Record<string, string> = { cash: 'Cash', bank_transfer: 'Bank Transfer', other: 'Other' };
 
   // Daily Delivery Action
@@ -75,6 +94,8 @@ export default function CustomerDetail() {
     const unitPrice = customer.pricePerUnit || settings.defaultWaterPrice || 30;
     const totalPrice = totalBottles * unitPrice;
     const nowTime = format(new Date(), 'HH:mm');
+    const riderId = isRider ? loggedInRiderId : customer.assignedDeliveryBoyId;
+    const riderName = isRider ? (auth.deliveryBoyName || 'Rider') : customer.assignedDeliveryBoyName;
 
     let newDelivery: Delivery;
     if (todayDelivery) {
@@ -90,6 +111,8 @@ export default function CustomerDetail() {
         paidAmount: todayPaymentStatus === 'paid' ? totalPrice : 0,
         status: 'delivered',
         skipReason: undefined,
+        deliveryBoyId: riderId,
+        deliveryBoyName: riderName,
         notes: extra > 0 ? `Delivered ${totalBottles} bottles (${extra} extra)` : `Rozana Delivery Entry`,
       })!;
     } else {
@@ -108,15 +131,13 @@ export default function CustomerDetail() {
         paymentStatus: todayPaymentStatus,
         paidAmount: todayPaymentStatus === 'paid' ? totalPrice : 0,
         status: 'delivered',
+        deliveryBoyId: riderId,
+        deliveryBoyName: riderName,
         notes: extra > 0 ? `Delivered ${totalBottles} bottles (${extra} extra)` : `Rozana Delivery Entry`,
       });
     }
 
     toast.success(`Aj ki delivery (${totalBottles} bottle) save ho gayi! (✅)`);
-
-    const bal = getCustomerBalance(customer.id);
-    // Open WhatsApp slip automatically
-    openWhatsAppDeliverySlip(newDelivery, customer, bal, settings, monthTotalBottles + totalBottles);
   };
 
   const handleSendDeliverySlipWhatsApp = (d: Delivery) => {

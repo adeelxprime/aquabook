@@ -46,10 +46,14 @@ export default function Layout() {
     return () => unsub();
   }, []);
 
-  // If rider visits root '/', redirect to quick-delivery
+  // If rider visits unallowed owner pages, redirect to quick-delivery
   useEffect(() => {
-    if (isRider && location.pathname === '/') {
-      navigate('/quick-delivery', { replace: true });
+    if (isRider) {
+      const allowed = ['/quick-delivery', '/customers', '/deliveries'];
+      const isAllowed = allowed.some(p => location.pathname === p || location.pathname.startsWith('/customers/'));
+      if (!isAllowed) {
+        navigate('/quick-delivery', { replace: true });
+      }
     }
   }, [isRider, location.pathname, navigate]);
 

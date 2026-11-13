@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { PageHeader, Card, Button, SearchInput, Modal, ConfirmDialog, FormInput, FormSelect, FormTextarea, SearchableSelect, StatusBadge, EmptyState } from '../components/ui';
-import { Truck, Plus, Edit, Trash2, Calendar, MessageSquare, Phone, Users, CheckSquare, Square, Check, X } from 'lucide-react';
+import { Truck, Plus, Edit, Trash2, Calendar, MessageSquare, Phone, Users, CheckSquare, Square, Check, X, Bike } from 'lucide-react';
 import { format } from 'date-fns';
 import { openWhatsAppDeliverySlip, openSmsDeliverySlip, getCustomerBalance } from '../services/dataService';
 import { getAuth } from '../services/adminService';
@@ -159,9 +159,11 @@ export default function Deliveries() {
 
   const filtered = useMemo(() => {
     return deliveries.filter(d => {
-      // If delivery boy is logged in, only show their deliveries
-      if (isDeliveryBoy && loggedInRiderId && d.deliveryBoyId && d.deliveryBoyId !== loggedInRiderId) {
-        return false;
+      // If delivery boy is logged in, strictly only show their own deliveries
+      if (isDeliveryBoy) {
+        if (!loggedInRiderId || d.deliveryBoyId !== loggedInRiderId) {
+          return false;
+        }
       }
       const matchSearch = !search || d.customerName.toLowerCase().includes(search.toLowerCase());
       const matchPaymentStatus = filterStatus === 'all' || d.paymentStatus === filterStatus;
@@ -177,7 +179,7 @@ export default function Deliveries() {
       const db = new Date(`${b.date}T${b.time || '00:00'}`);
       return db.getTime() - da.getTime();
     });
-  }, [deliveries, search, filterStatus, filterDeliveryStatus, filterDeliveryBoy, filterCustomer, startDate, endDate]);
+  }, [deliveries, search, filterStatus, filterDeliveryStatus, filterDeliveryBoy, filterCustomer, startDate, endDate, isDeliveryBoy, loggedInRiderId]);
 
   const customerOptions = customers.map(c => ({ value: c.id, label: c.name, sublabel: `${c.phone}${c.area ? ` • ${c.area}` : ''}` }));
   const fmt = (v: number) => `${settings.currencySymbol}${v.toLocaleString()}`;
@@ -322,14 +324,8 @@ export default function Deliveries() {
       updateDelivery(editingId, data);
       toast.success('Delivery updated!');
     } else {
-      const newDel = addDelivery(data);
+      addDelivery(data);
       toast.success(isSkipped ? 'Pani Nahi Gya (Cross ❌) recorded!' : 'Delivery recorded! (✅)');
-
-      // Offer quick WhatsApp slip if customer phone exists
-      if (customer && customer.phone) {
-        const bal = getCustomerBalance(customer.id);
-        openWhatsAppDeliverySlip(newDel, customer, bal, settings);
-      }
     }
     setIsModalOpen(false);
   };
@@ -402,14 +398,21 @@ export default function Deliveries() {
             <option value="delivered">✅ Delivered (Pani Gya)</option>
             <option value="skipped">❌ Skipped (Pani Nahi Gya)</option>
           </select>
-          <select 
-            value={filterDeliveryBoy} 
-            onChange={(e) => setFilterDeliveryBoy(e.target.value)} 
-            className="px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/20"
-          >
-            <option value="all">All Riders</option>
-            {deliveryBoys.map(b => <option key={b.id} value={b.id}>🛵 {b.name}</option>)}
-          </select>
+          {isDeliveryBoy ? (
+            <div className="px-3 py-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs font-bold text-emerald-800 flex items-center gap-1.5">
+              <Bike className="w-4 h-4 text-emerald-600" />
+              <span>Rider: {auth.deliveryBoyName || 'My Deliveries'}</span>
+            </div>
+          ) : (
+            <select 
+              value={filterDeliveryBoy} 
+              onChange={(e) => setFilterDeliveryBoy(e.target.value)} 
+              className="px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/20"
+            >
+              <option value="all">All Riders</option>
+              {deliveryBoys.map(b => <option key={b.id} value={b.id}>🛵 {b.name}</option>)}
+            </select>
+          )}
           <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/20">
             <option value="all">All Payment Status</option>
             <option value="paid">Paid</option>

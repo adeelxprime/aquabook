@@ -67,6 +67,9 @@ interface AppContextType {
     riderName: string;
     riderPhone: string;
     areaOrBlock: string;
+    targetType?: 'all_assigned' | 'block' | 'area';
+    targetValue?: string;
+    customerIds?: string[];
     customerCount: number;
     bottleCount: number;
     message?: string;
@@ -74,6 +77,7 @@ interface AppContextType {
     dispatchDay?: string;
   }) => RouteDispatchRecord;
   acknowledgeRouteDispatch: (id: string) => void;
+  completeRouteDispatch: (id: string) => void;
   getActiveRouteForRider: (riderId: string) => RouteDispatchRecord | null;
 
   // Truck / Container actions
@@ -187,10 +191,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     handleAuthOrStorage();
 
     window.addEventListener('aquabook_auth_change', handleAuthOrStorage);
+    window.addEventListener('aquabook_route_dispatched', refreshRouteDispatches);
+    window.addEventListener('aquabook_route_updated', refreshRouteDispatches);
     window.addEventListener('storage', handleAuthOrStorage);
 
     return () => {
       window.removeEventListener('aquabook_auth_change', handleAuthOrStorage);
+      window.removeEventListener('aquabook_route_dispatched', refreshRouteDispatches);
+      window.removeEventListener('aquabook_route_updated', refreshRouteDispatches);
       window.removeEventListener('storage', handleAuthOrStorage);
     };
   }, [refreshAll, syncFromCloud]);
@@ -307,6 +315,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     riderName: string;
     riderPhone: string;
     areaOrBlock: string;
+    targetType?: 'all_assigned' | 'block' | 'area';
+    targetValue?: string;
+    customerIds?: string[];
     customerCount: number;
     bottleCount: number;
     message?: string;
@@ -331,8 +342,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setRouteDispatches(db.getRouteDispatches());
   }, []);
 
+  const completeRouteDispatchAction = useCallback((id: string) => {
+    db.completeRouteDispatch(id);
+    const currentAuth = getAuth();
+    if (currentAuth.businessId && isSupabaseConfigured()) {
+      upsertRouteDispatchesPayloadToSupabase(currentAuth.businessId, db.getRouteDispatches()).catch(() => {});
+    }
+    setRouteDispatches(db.getRouteDispatches());
+  }, []);
+
   const getActiveRouteForRiderAction = useCallback((riderId: string) => {
-    return routeDispatches.find(d => d.riderId === riderId && d.status === 'active') || null;
+    return db.getActiveRouteDispatchForRider(riderId);
   }, [routeDispatches]);
 
   const addTruckSupplyAction = useCallback((supply: Omit<TruckSupply, 'id' | 'createdAt' | 'updatedAt'>) => {
@@ -405,6 +425,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addDeliveryBoy: addDeliveryBoyAction, updateDeliveryBoy: updateDeliveryBoyAction, deleteDeliveryBoy: deleteDeliveryBoyAction,
       dispatchRouteToRider: dispatchRouteToRiderAction,
       acknowledgeRouteDispatch: acknowledgeRouteDispatchAction,
+      completeRouteDispatch: completeRouteDispatchAction,
       getActiveRouteForRider: getActiveRouteForRiderAction,
       addTruckSupply: addTruckSupplyAction, updateTruckSupply: updateTruckSupplyAction, deleteTruckSupply: deleteTruckSupplyAction,
       addPayment, updatePayment, deletePayment: deletePaymentAction,

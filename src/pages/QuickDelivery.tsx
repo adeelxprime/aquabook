@@ -27,7 +27,7 @@ export default function QuickDelivery() {
   const { 
     customers, deliveries, addDelivery, updateDelivery, 
     recordSkippedDelivery, deliveryBoys, settings,
-    getActiveRouteForRider, acknowledgeRouteDispatch
+    getActiveRouteForRider, acknowledgeRouteDispatch, completeRouteDispatch
   } = useApp();
 
   const auth = getAuth();
@@ -110,11 +110,33 @@ export default function QuickDelivery() {
   useEffect(() => {
     if (isRiderLoggedIn && loggedInRiderId) {
       setSelectedRiderId(loggedInRiderId);
-      // NOTE: Removed forced block locking (setBlockFilter) so rider sees all their scheduled customers for today
     } else if (riderParam) {
       setSelectedRiderId(riderParam);
     }
   }, [riderParam, isRiderLoggedIn, loggedInRiderId]);
+
+  // Auto-apply active dispatched route filters for logged-in rider
+  useEffect(() => {
+    if (isRiderLoggedIn && activeRouteNotification) {
+      if (activeRouteNotification.dispatchMode === 'day') {
+        setSelectedDaySchedule(activeRouteNotification.dispatchDay || 'auto');
+        setBlockFilter('all');
+        setAreaFilter('all');
+      } else if (activeRouteNotification.dispatchMode === 'block') {
+        setSelectedDaySchedule('all');
+        if (activeRouteNotification.targetValue && activeRouteNotification.targetValue !== 'all_assigned') {
+          setBlockFilter(activeRouteNotification.targetValue);
+        } else {
+          setBlockFilter('all');
+        }
+      } else if (activeRouteNotification.dispatchMode === 'both') {
+        setSelectedDaySchedule(activeRouteNotification.dispatchDay || 'auto');
+        if (activeRouteNotification.targetValue && activeRouteNotification.targetValue !== 'all_assigned') {
+          setBlockFilter(activeRouteNotification.targetValue);
+        }
+      }
+    }
+  }, [isRiderLoggedIn, activeRouteNotification]);
 
   // Multi-Customer Selection State
   const [selectedCustomerIds, setSelectedCustomerIds] = useState<string[]>([]);
@@ -230,11 +252,56 @@ export default function QuickDelivery() {
           return false;
         }
 
-        // If rider has assigned blocks or areas, customer must match them unless directly assigned or already delivered
-        if (assignedAreas.length > 0 || assignedBlocks.length > 0) {
-          const matchArea = c.area && assignedAreas.includes(c.area);
-          const matchBlock = c.block && assignedBlocks.includes(c.block);
-          if (!matchArea && !matchBlock && !isDirectlyAssigned && !hasDeliveredByThisRider) {
+        // Strict Route Enforcement:
+        // Case 1: Active Dispatched Route exists
+        if (activeRouteNotification) {
+          if (activeRouteNotification.customerIds && activeRouteNotification.customerIds.length > 0) {
+            // Must be in the dispatched customer list
+            if (!activeRouteNotification.customerIds.includes(c.id) && !hasDeliveredByThisRider) {
+              return false;
+            }
+          } else {
+            // Fallback for dispatches without customerIds list
+            if (activeRouteNotification.dispatchMode === 'day') {
+              const reqDay = activeRouteNotification.dispatchDay || selectedDayName;
+              if (reqDay !== 'all') {
+                const cDays = c.deliveryDays && c.deliveryDays.length > 0 ? c.deliveryDays : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+                if (!cDays.includes(reqDay) && !hasDeliveredByThisRider) return false;
+              }
+              if (assignedBlocks.length > 0 || assignedAreas.length > 0) {
+                const matchArea = c.area && assignedAreas.includes(c.area);
+                const matchBlock = c.block && assignedBlocks.includes(c.block);
+                if (!matchArea && !matchBlock && !isDirectlyAssigned && !hasDeliveredByThisRider) return false;
+              }
+            } else if (activeRouteNotification.dispatchMode === 'block') {
+              const target = activeRouteNotification.targetValue;
+              if (target && target !== 'all_assigned') {
+                const matchTarget = c.block === target || c.area === target;
+                if (!matchTarget && !hasDeliveredByThisRider) return false;
+              } else if (assignedBlocks.length > 0 || assignedAreas.length > 0) {
+                const matchArea = c.area && assignedAreas.includes(c.area);
+                const matchBlock = c.block && assignedBlocks.includes(c.block);
+                if (!matchArea && !matchBlock && !isDirectlyAssigned && !hasDeliveredByThisRider) return false;
+              }
+            } else if (activeRouteNotification.dispatchMode === 'both') {
+              const reqDay = activeRouteNotification.dispatchDay || selectedDayName;
+              if (reqDay !== 'all') {
+                const cDays = c.deliveryDays && c.deliveryDays.length > 0 ? c.deliveryDays : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+                if (!cDays.includes(reqDay) && !hasDeliveredByThisRider) return false;
+              }
+              const target = activeRouteNotification.targetValue;
+              if (target && target !== 'all_assigned') {
+                const matchTarget = c.block === target || c.area === target;
+                if (!matchTarget && !hasDeliveredByThisRider) return false;
+              }
+            }
+          }
+        } else {
+          // Case 2: No active dispatch - Rider strictly only sees their assigned route
+          const matchesDirect = isDirectlyAssigned || hasDeliveredByThisRider;
+          const matchesBlock = assignedBlocks.length > 0 && c.block && assignedBlocks.includes(c.block);
+          const matchesArea = assignedAreas.length > 0 && c.area && assignedAreas.includes(c.area);
+          if (!matchesDirect && !matchesBlock && !matchesArea) {
             return false;
           }
         }
@@ -296,11 +363,12 @@ export default function QuickDelivery() {
 
       // Strict Day-wise Schedule Filter
       const activeScheduleDay = selectedDaySchedule === 'auto' ? selectedDayName : selectedDaySchedule;
+      const customerDays = c.deliveryDays && c.deliveryDays.length > 0 ? c.deliveryDays : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
       const matchesDay = selectedDaySchedule === 'all'
         ? true
         : selectedDaySchedule === 'unscheduled'
         ? (!c.deliveryDays || c.deliveryDays.length === 0)
-        : Boolean(c.deliveryDays && c.deliveryDays.includes(activeScheduleDay));
+        : customerDays.includes(activeScheduleDay);
 
       return matchSearch && matchArea && matchBlock && matchTab && matchesDay;
     });
@@ -319,7 +387,7 @@ export default function QuickDelivery() {
     });
 
     return list;
-  }, [customers, search, areaFilter, blockFilter, statusTab, selectedRiderId, selectedRider, todayDeliveriesMap, selectedDaySchedule, selectedDayName]);
+  }, [customers, search, areaFilter, blockFilter, statusTab, selectedRiderId, selectedRider, todayDeliveriesMap, selectedDaySchedule, selectedDayName, isRiderLoggedIn, loggedInRiderId, activeRouteNotification, deliveryBoys]);
 
   // Pending customers on current filtered route
   const pendingCustomers = useMemo(() => {
@@ -519,11 +587,6 @@ export default function QuickDelivery() {
     const extraNotice = extraQty > 0 ? ` (+${extraQty} Extra 🍾)` : '';
     const emptyNotice = entry.emptyReturned ? `(Khali Can: ${emptyCans} ✅)` : `(Khali Can Nahi Mila ❌)`;
     toast.success(`Delivered ${totalQty} bottles to ${customer.name}! ${extraNotice} ${emptyNotice} (Tick ✅)`);
-
-    if (settings.notificationsEnabled) {
-      const bal = getCustomerBalance(customer.id);
-      openWhatsAppDeliverySlip(newDelivery, customer, bal, settings);
-    }
   };
 
   // Open Skip / Crossmark Modal
@@ -686,16 +749,26 @@ export default function QuickDelivery() {
     const assignedAreas = rider?.assignedAreas || [];
     const assignedBlocks = rider?.assignedBlocks || [];
 
+    // If active dispatch exists for this rider, scope strictly to dispatched customers!
+    if (isRiderLoggedIn && activeRouteNotification) {
+      if (activeRouteNotification.customerIds && activeRouteNotification.customerIds.length > 0) {
+        return customers.filter(c => c.status === 'active' && activeRouteNotification.customerIds!.includes(c.id));
+      }
+      if (activeRouteNotification.dispatchMode === 'block' && activeRouteNotification.targetValue && activeRouteNotification.targetValue !== 'all_assigned') {
+        const tgt = activeRouteNotification.targetValue;
+        return customers.filter(c => c.status === 'active' && (c.block === tgt || c.area === tgt));
+      }
+    }
+
     return customers.filter(c => {
       if (c.status !== 'active') return false;
       if (c.assignedDeliveryBoyId === activeRiderId) return true;
       if (c.assignedDeliveryBoyId && c.assignedDeliveryBoyId !== activeRiderId) return false;
       if (assignedBlocks.length > 0 && c.block && assignedBlocks.includes(c.block)) return true;
       if (assignedAreas.length > 0 && c.area && assignedAreas.includes(c.area)) return true;
-      if (assignedBlocks.length === 0 && assignedAreas.length === 0 && !c.assignedDeliveryBoyId) return true;
-      return false;
+      return false; // Strictly false for any customer outside rider's route!
     });
-  }, [customers, activeRiderId, deliveryBoys]);
+  }, [customers, activeRiderId, deliveryBoys, isRiderLoggedIn, activeRouteNotification]);
 
   const routeTargetCustomers = useMemo(() => {
     const activeScheduleDay = selectedDaySchedule === 'auto' ? selectedDayName : selectedDaySchedule;
@@ -750,16 +823,28 @@ export default function QuickDelivery() {
 
       {/* Rider Urgent Route Alert Banner */}
       {isRiderLoggedIn && activeRouteNotification && (
-        <div className="bg-gradient-to-r from-sky-600 via-blue-700 to-indigo-700 text-white p-4 rounded-2xl shadow-lg border border-sky-400/40 relative overflow-hidden animate-in fade-in slide-in-from-top-2 duration-300">
+        <div className={`text-white p-4 rounded-2xl shadow-lg border relative overflow-hidden animate-in fade-in slide-in-from-top-2 duration-300 ${
+          activeRouteNotification.status === 'in_progress'
+            ? 'bg-gradient-to-r from-emerald-600 via-teal-700 to-cyan-800 border-emerald-400/40'
+            : 'bg-gradient-to-r from-sky-600 via-blue-700 to-indigo-700 border-sky-400/40'
+        }`}>
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-start gap-3">
               <div className="w-11 h-11 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center shrink-0 text-white shadow-inner">
-                <Bell className="w-6 h-6 text-amber-300 animate-bounce" />
+                {activeRouteNotification.status === 'in_progress' ? (
+                  <Bike className="w-6 h-6 text-emerald-200" />
+                ) : (
+                  <Bell className="w-6 h-6 text-amber-300 animate-bounce" />
+                )}
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="text-[10px] uppercase tracking-wider bg-amber-400 text-amber-950 font-black px-2.5 py-0.5 rounded-full shadow-2xs">
-                    🚨 Naya Route Order Dispatch
+                  <span className={`text-[10px] uppercase tracking-wider font-black px-2.5 py-0.5 rounded-full shadow-2xs ${
+                    activeRouteNotification.status === 'in_progress'
+                      ? 'bg-emerald-400 text-emerald-950'
+                      : 'bg-amber-400 text-amber-950'
+                  }`}>
+                    {activeRouteNotification.status === 'in_progress' ? '🛵 Active Route In Progress' : '🚨 Naya Route Order Dispatch'}
                   </span>
                   <span className="text-xs text-sky-100 font-medium">
                     {activeRouteNotification.dispatchedAt ? format(new Date(activeRouteNotification.dispatchedAt), 'hh:mm a') : 'Today'}
@@ -773,54 +858,59 @@ export default function QuickDelivery() {
                     "{activeRouteNotification.message}"
                   </p>
                 )}
+                {activeRouteNotification.status === 'in_progress' && (
+                  <p className="text-[11px] text-emerald-100 mt-1 font-bold">
+                    Progress: {deliveredCount} Delivered (✅) • {pendingCount} Pending • {skippedCount} Skipped (❌)
+                  </p>
+                )}
               </div>
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={() => {
-                  if (typeof acknowledgeRouteDispatch === 'function') {
-                    acknowledgeRouteDispatch(activeRouteNotification.id);
-                  }
-                  if (activeRouteNotification.dispatchMode === 'day') {
-                    setSelectedDaySchedule(activeRouteNotification.dispatchDay || 'auto');
-                    setBlockFilter('all');
-                    setAreaFilter('all');
-                  } else if (activeRouteNotification.dispatchMode === 'block') {
-                    setSelectedDaySchedule('all');
-                    if (activeRouteNotification.areaOrBlock) {
-                      if (distinctBlocks.includes(activeRouteNotification.areaOrBlock)) {
-                        setBlockFilter(activeRouteNotification.areaOrBlock);
-                      } else if (areas.includes(activeRouteNotification.areaOrBlock)) {
-                        setAreaFilter(activeRouteNotification.areaOrBlock);
+              {activeRouteNotification.status !== 'in_progress' ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (typeof acknowledgeRouteDispatch === 'function') {
+                      acknowledgeRouteDispatch(activeRouteNotification.id);
+                    }
+                    if (activeRouteNotification.dispatchMode === 'day') {
+                      setSelectedDaySchedule(activeRouteNotification.dispatchDay || 'auto');
+                      setBlockFilter('all');
+                      setAreaFilter('all');
+                    } else if (activeRouteNotification.dispatchMode === 'block') {
+                      setSelectedDaySchedule('all');
+                      if (activeRouteNotification.targetValue && activeRouteNotification.targetValue !== 'all_assigned') {
+                        setBlockFilter(activeRouteNotification.targetValue);
+                      }
+                    } else if (activeRouteNotification.dispatchMode === 'both') {
+                      setSelectedDaySchedule(activeRouteNotification.dispatchDay || 'auto');
+                      if (activeRouteNotification.targetValue && activeRouteNotification.targetValue !== 'all_assigned') {
+                        setBlockFilter(activeRouteNotification.targetValue);
                       }
                     }
-                  } else if (activeRouteNotification.dispatchMode === 'both') {
-                    setSelectedDaySchedule(activeRouteNotification.dispatchDay || 'auto');
-                    if (activeRouteNotification.areaOrBlock) {
-                      if (distinctBlocks.includes(activeRouteNotification.areaOrBlock)) {
-                        setBlockFilter(activeRouteNotification.areaOrBlock);
-                      } else if (areas.includes(activeRouteNotification.areaOrBlock)) {
-                        setAreaFilter(activeRouteNotification.areaOrBlock);
-                      }
+                    toast.success('Route shuru kar diya gaya hai! Deliveries complete karein.');
+                  }}
+                  className="px-4 py-2.5 bg-white hover:bg-emerald-50 text-emerald-800 rounded-xl font-black text-xs shadow-md transition-all flex items-center gap-1.5 active:scale-95"
+                >
+                  <Check className="w-4 h-4 text-emerald-600" />
+                  <span>Start Route / Samjh Gaya</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (typeof completeRouteDispatch === 'function') {
+                      completeRouteDispatch(activeRouteNotification.id);
                     }
-                  } else {
-                    if (activeRouteNotification.areaOrBlock && activeRouteNotification.areaOrBlock !== 'All Assigned Areas') {
-                      if (distinctBlocks.includes(activeRouteNotification.areaOrBlock)) {
-                        setBlockFilter(activeRouteNotification.areaOrBlock);
-                      } else if (areas.includes(activeRouteNotification.areaOrBlock)) {
-                        setAreaFilter(activeRouteNotification.areaOrBlock);
-                      }
-                    }
-                  }
-                  toast.success('Route shuru kar diya gaya hai! Deliveries complete karein.');
-                }}
-                className="px-4 py-2.5 bg-white hover:bg-emerald-50 text-emerald-800 rounded-xl font-black text-xs shadow-md transition-all flex items-center gap-1.5 active:scale-95"
-              >
-                <Check className="w-4 h-4 text-emerald-600" />
-                <span>Start Route / Samjh Gaya</span>
-              </button>
+                    toast.success('Mubarak! Aaj ka route mukammal ho gaya.');
+                  }}
+                  className="px-3.5 py-2 bg-emerald-500/30 hover:bg-emerald-500/40 text-white border border-white/20 rounded-xl font-bold text-xs transition-all flex items-center gap-1.5"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Route Mukammal Karein</span>
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -2040,7 +2130,7 @@ export default function QuickDelivery() {
             {/* Quick Bulk Settings */}
             <div className="flex flex-wrap items-center gap-2 text-xs">
               {/* Rider Select */}
-              {deliveryBoys.length > 0 && (
+              {deliveryBoys.length > 0 && !isRiderLoggedIn && (
                 <select
                   value={bulkRiderId}
                   onChange={e => setBulkRiderId(e.target.value)}
@@ -2450,7 +2540,7 @@ export default function QuickDelivery() {
             </div>
 
             {/* Rider Selector (if owner) */}
-            {deliveryBoys.length > 0 && selectedRiderId === 'all' && (
+            {deliveryBoys.length > 0 && selectedRiderId === 'all' && !isRiderLoggedIn && (
               <div>
                 <label className="block text-xs font-semibold text-gray-700 mb-1">
                   Yeh Extra Bottle Kaun Deliver Kar Raha Hai?

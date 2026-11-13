@@ -26,6 +26,11 @@ export default function Customers() {
 
   const auth = getAuth();
   const isDeliveryBoy = auth.userType === 'delivery_boy';
+  const loggedInRiderId = auth.deliveryBoyId || '';
+  const currentRider = useMemo(() => {
+    if (!isDeliveryBoy || !loggedInRiderId) return null;
+    return deliveryBoys.find(b => b.id === loggedInRiderId) || null;
+  }, [isDeliveryBoy, loggedInRiderId, deliveryBoys]);
 
   // Form state
   const [form, setForm] = useState({
@@ -44,14 +49,35 @@ export default function Customers() {
   // Unique blocks across active customers
   const distinctBlocks = useMemo(() => {
     const set = new Set<string>();
-    customers.forEach(c => {
+    const baseList = isDeliveryBoy && currentRider?.assignedBlocks?.length 
+      ? customers.filter(c => currentRider.assignedBlocks?.includes(c.block || ''))
+      : customers;
+    baseList.forEach(c => {
       if (c.block && c.block.trim()) set.add(c.block.trim());
     });
     return Array.from(set);
-  }, [customers]);
+  }, [customers, isDeliveryBoy, currentRider]);
 
   const filtered = useMemo(() => {
     let list = customers.filter(c => {
+      // Rider Isolation: If delivery boy is logged in, only show their own route / assigned customers
+      if (isDeliveryBoy) {
+        if (c.assignedDeliveryBoyId && c.assignedDeliveryBoyId !== loggedInRiderId) {
+          return false;
+        }
+
+        const assignedBlocks = currentRider?.assignedBlocks || [];
+        const assignedAreas = currentRider?.assignedAreas || [];
+        const isDirectlyAssigned = c.assignedDeliveryBoyId === loggedInRiderId;
+
+        const matchesDirect = isDirectlyAssigned;
+        const matchesBlock = assignedBlocks.length > 0 && c.block && assignedBlocks.includes(c.block);
+        const matchesArea = assignedAreas.length > 0 && c.area && assignedAreas.includes(c.area);
+        if (!matchesDirect && !matchesBlock && !matchesArea) {
+          return false;
+        }
+      }
+
       const matchSearch = !search || c.name.toLowerCase().includes(search.toLowerCase()) ||
         c.phone.toLowerCase().includes(search.toLowerCase()) || 
         c.address.toLowerCase().includes(search.toLowerCase()) ||
@@ -61,11 +87,12 @@ export default function Customers() {
       const matchBlock = selectedBlock === 'all' || c.block === selectedBlock;
 
       // Strict Day-wise Schedule Match
+      const customerDays = c.deliveryDays && c.deliveryDays.length > 0 ? c.deliveryDays : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
       const matchDay = selectedDayFilter === 'all'
         ? true
         : selectedDayFilter === 'unscheduled'
         ? (!c.deliveryDays || c.deliveryDays.length === 0)
-        : Boolean(c.deliveryDays && c.deliveryDays.includes(selectedDayFilter));
+        : customerDays.includes(selectedDayFilter);
 
       return matchSearch && matchFilter && matchBlock && matchDay;
     });
@@ -80,7 +107,7 @@ export default function Customers() {
       }
     });
     return list;
-  }, [customers, search, filter, selectedBlock, selectedDayFilter, sort, getCustomerBalance]);
+  }, [customers, search, filter, selectedBlock, selectedDayFilter, sort, getCustomerBalance, isDeliveryBoy, loggedInRiderId, currentRider, deliveryBoys]);
 
   const fmt = (v: number) => `${settings.currencySymbol}${v.toLocaleString()}`;
 
@@ -173,8 +200,8 @@ export default function Customers() {
   return (
     <div className="space-y-6 pb-20 lg:pb-0">
       <PageHeader
-        title="Customers"
-        subtitle={`${customers.length} total customers`}
+        title={isDeliveryBoy ? "My Route Customers" : "Customers"}
+        subtitle={isDeliveryBoy ? `${filtered.length} customers on your assigned route` : `${customers.length} total customers`}
         action={
           <div className="flex items-center gap-2">
             <Button 

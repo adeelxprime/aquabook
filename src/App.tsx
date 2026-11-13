@@ -71,6 +71,8 @@ function App() {
           >
             <Route index element={<Dashboard />} />
             <Route path="quick-delivery" element={<QuickDelivery />} />
+            <Route path="today-route" element={<Navigate to="/quick-delivery" replace />} />
+            <Route path="route" element={<Navigate to="/quick-delivery" replace />} />
             <Route path="delivery-boys" element={<DeliveryBoys />} />
             <Route path="truck-supply" element={<TruckSupply />} />
             <Route path="customers" element={<Customers />} />
